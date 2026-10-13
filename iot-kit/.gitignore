@@ -1,0 +1,7 @@
+.env
+mosquitto/passwd
+mosquitto/acl
+certs/
+__pycache__/
+deploy/config-mqtt.h
+firmware/*/config.h

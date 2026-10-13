@@ -1,0 +1,72 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: ifri-mosquitto
+    restart: unless-stopped
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks: [iot]
+
+  # Chaque service ne reçoit que les secrets dont il a besoin (valeurs lues dans .env).
+  telegram-bridge:
+    build: ./telegram-bridge
+    container_name: ifri-telegram-bridge
+    restart: unless-stopped
+    environment:
+      MQTT_TELEGRAM_USER: ${MQTT_TELEGRAM_USER}
+      MQTT_TELEGRAM_PASSWORD: ${MQTT_TELEGRAM_PASSWORD}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      SOS_COOLDOWN_SECONDS: ${SOS_COOLDOWN_SECONDS:-30}
+    volumes:
+      - telegram_data:/data
+    depends_on: [mosquitto]
+    networks: [iot]
+
+  dashboard:
+    build: ./dashboard
+    container_name: ifri-iot-dashboard
+    restart: unless-stopped
+    environment:
+      MQTT_DASHBOARD_USER: ${MQTT_DASHBOARD_USER}
+      MQTT_DASHBOARD_PASSWORD: ${MQTT_DASHBOARD_PASSWORD}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on: [mosquitto]
+    networks: [iot]
+
+  # HTTPS + mot de passe devant le dashboard (https://DOMAIN)
+  caddy:
+    image: caddy:2.8
+    container_name: ifri-caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      DASHBOARD_USER: ${DASHBOARD_USER}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH}
+    ports:
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+    depends_on: [dashboard]
+    networks: [iot]
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  caddy_data:
+  telegram_data:
+
+networks:
+  iot:

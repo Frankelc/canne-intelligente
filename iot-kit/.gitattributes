@@ -1,0 +1,6 @@
+# Les scripts tournent sur le VPS Linux : fins de ligne LF obligatoires.
+*.sh text eol=lf
+Caddyfile text eol=lf
+*.conf text eol=lf
+acl text eol=lf
+.env.example text eol=lf

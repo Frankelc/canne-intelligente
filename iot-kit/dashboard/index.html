@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canne connectée</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0b0d12; --ink-2:#11141b; --ink-3:#171b24; --line:#222734; --line-2:#2e3443;
+  --paper:#eceef3; --muted:#8b92a5; --dim:#5a6175;
+  --tactile:#f2c94c;               /* accent unique : jaune podotactile */
+  --danger:#ef4f5f; --warn:#f2994a; --free:#3ecf8e; --info:#5aa9e6;
+  --radius:12px;
+  --font:"Atkinson Hyperlegible",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--paper)}
+body{font:16px/1.45 var(--font);min-height:100vh;overflow-x:hidden}
+.wrap{max-width:1400px;margin:0 auto;padding:20px 16px 32px}
+
+/* ---------- Bandeau ---------- */
+.sim{display:none;background:var(--tactile);color:#111;font-weight:700;font-size:.9rem;text-align:center;padding:6px 12px;letter-spacing:.04em}
+body.demo .sim{display:block}
+
+header.top{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.logo{width:40px;height:40px;flex:none;border-radius:10px;background:var(--tactile);color:#111;display:grid;place-items:center;font-size:22px}
+.title h1{margin:0;font-size:1.35rem;line-height:1.2;font-weight:700}
+.title p{margin:2px 0 0;color:var(--muted);font-size:.88rem}
+.clock{font:600 1.3rem var(--mono);color:var(--paper);text-align:right;white-space:nowrap}
+.clock small{display:block;font:400 .8rem var(--font);color:var(--muted)}
+
+/* ---------- Statuts ---------- */
+.status{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.chip{background:var(--ink-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 14px;display:flex;gap:10px;align-items:center;min-width:0}
+.chip>div{min-width:0}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dim)}
+.chip.ok .dot{background:var(--free)}
+.chip.warn .dot{background:var(--warn)}
+.chip.bad .dot{background:var(--danger);animation:blink 1.2s infinite}
+.chip.bad{border-color:#ef4f5f66}
+.chip .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.chip .v{font-weight:700;font-size:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-left:6px;vertical-align:-1px}
+.bars i{width:4px;background:var(--line-2);border-radius:1px}
+.bars i.on{background:var(--paper)}
+
+/* ---------- Grille principale ---------- */
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px}
+.col{display:grid;gap:16px;align-content:start;min-width:0}
+.panel{min-width:0;background:var(--ink-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden}
+.panel h2{margin:0;font-size:1rem;font-weight:700;color:var(--paper)}
+.panel .sub{margin:2px 0 12px;color:var(--muted);font-size:.85rem}
+
+/* Radar */
+.radar svg{width:100%;height:auto;display:block}
+.ring{fill:none;stroke:#ffffff12;stroke-dasharray:2 6}
+.ring.z50{stroke:#ef4f5f40;stroke-dasharray:none}
+.ring.z120{stroke:#f2994a33;stroke-dasharray:none}
+.ringlbl{fill:var(--dim);font:500 12px var(--mono)}
+.cone-bg{fill:#ffffff04;stroke:#ffffff0c}
+.cone{transition:d .4s}
+.arc{fill:none;stroke-width:5;stroke-linecap:round}
+.lbl{font:700 14px var(--font);fill:var(--muted)}
+.dist{font:600 20px var(--mono)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);margin-top:8px}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:0}
+
+/* Profil */
+.profile svg{width:100%;height:auto;display:block}
+.beam{opacity:.9}
+.zone-txt{font:700 12px var(--font);letter-spacing:.05em;text-transform:uppercase}
+
+/* Voix */
+.voice{display:flex;flex-direction:column;gap:12px}
+.voice .sub{margin-bottom:0}
+.said{min-height:120px;display:flex;flex-direction:column;justify-content:center;border-radius:10px;padding:16px 18px;background:var(--ink-3);border-left:4px solid var(--tactile)}
+.said q{quotes:"« " " »";font-weight:700;font-size:clamp(1.4rem,2.2vw,2rem);line-height:1.15}
+.said .meta{margin-top:8px;color:var(--muted);font-size:.85rem;display:flex;align-items:center;gap:10px}
+.said.fresh{animation:flash .8s ease-out}
+.eq{display:inline-flex;gap:3px;align-items:center;height:16px}
+.eq i{width:3px;height:4px;background:var(--tactile);border-radius:2px}
+.said.fresh .eq i{animation:eq .5s ease-in-out 4 alternate}
+.eq i:nth-child(2){animation-delay:.12s!important}.eq i:nth-child(3){animation-delay:.24s!important}.eq i:nth-child(4){animation-delay:.08s!important}.eq i:nth-child(5){animation-delay:.3s!important}
+button.speak{font:700 .95rem var(--font);color:var(--paper);background:var(--ink-3);border:1px solid var(--line-2);border-radius:10px;padding:10px 14px;cursor:pointer;display:flex;gap:10px;align-items:center;justify-content:center}
+button.speak:hover{border-color:var(--muted)}
+button.speak[aria-pressed="true"]{border-color:var(--tactile);color:var(--tactile)}
+button:focus-visible{outline:3px solid var(--info);outline-offset:3px}
+
+/* Compteurs */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--ink-3);border-radius:10px;padding:10px 14px}
+.stat .n{font:600 1.8rem/1 var(--mono)}
+.stat .t{color:var(--muted);font-size:.8rem;margin-top:6px}
+
+/* Journal */
+.log{list-style:none;margin:0;padding:0;max-height:360px;overflow:auto}
+.log li{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--line)}
+.log li:last-child{border-bottom:0}
+.log .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:.85rem;background:var(--ink-3);color:var(--muted)}
+.log li.sos{background:#ef4f5f14;border-radius:8px;border-bottom-color:transparent}
+.log li.sos .ic{background:var(--danger);color:#fff;font-weight:700;font-size:.6rem}
+.log .m{font-weight:700;font-size:.95rem}.log .s{font-size:.82rem;color:var(--muted)}
+.log .s.ok{color:var(--free)}.log .s.wait{color:var(--warn)}
+.log time{font:500 .8rem var(--mono);color:var(--dim)}
+.empty{color:var(--muted);border:1px dashed var(--line-2);border-radius:10px;padding:16px;text-align:center}
+
+/* SOS plein écran */
+.sos-overlay{position:fixed;inset:0;z-index:20;display:none;place-items:center;text-align:center;padding:24px;background:#b3192bf2}
+.sos-overlay.show{display:grid;animation:fade .3s ease-out}
+.sos-overlay .br{font-size:clamp(2rem,6vw,4rem);color:#fff;letter-spacing:.15em;opacity:.8}
+.sos-overlay h3{margin:6px 0 0;font-size:clamp(3.5rem,13vw,10rem);line-height:.9;color:#fff;letter-spacing:.05em}
+.sos-overlay p{font-size:clamp(1.1rem,2.4vw,1.8rem);margin:16px 0 0;color:#fff}
+.sos-overlay .st{display:inline-block;margin-top:18px;padding:12px 22px;border-radius:999px;font-weight:700;font-size:clamp(1.1rem,2.2vw,1.6rem);background:#0005;color:#fff}
+.sos-overlay .st.ok{background:#fff;color:#0a5c36}
+.sos-overlay .ring-sos{position:absolute;width:40vmin;height:40vmin;border:2px solid #fff6;border-radius:50%;animation:sosring 1.6s ease-out infinite}
+.sos-overlay small{display:block;margin-top:22px;color:#fffb}
+
+footer{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);color:var(--dim);font-size:.82rem;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+@keyframes blink{50%{opacity:.35}}
+@keyframes eq{from{height:4px}to{height:16px}}
+@keyframes flash{0%{background:#f2c94c22}100%{background:var(--ink-3)}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes sosring{from{transform:scale(.6);opacity:1}to{transform:scale(2.2);opacity:0}}
+
+@media (max-width:1100px){.status{grid-template-columns:repeat(3,minmax(0,1fr))}.grid{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:620px){
+  header.top{flex-direction:column;align-items:flex-start}.clock{text-align:left}
+  .status{grid-template-columns:repeat(2,minmax(0,1fr))}.stat .n{font-size:1.5rem}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="sim" role="status">Mode simulation — données fictives, aucune canne connectée</div>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 3c2.2 0 3.5 1.4 3.5 3.2" fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round"/><path d="M15 3 7 21" stroke="#111" stroke-width="2.4" stroke-linecap="round"/><path d="M8.3 18 7 21" stroke="#c62334" stroke-width="2.6" stroke-linecap="round"/></svg></div>
+      <div class="title">
+        <h1>Canne &amp; lunettes intelligentes</h1>
+        <p>Supervision en direct · IFRI · Certification SEIoT · Projet 3</p>
+      </div>
+    </div>
+    <div class="clock"><span id="clock">--:--:--</span><small id="updated">En attente des données…</small></div>
+  </header>
+
+  <section class="status" aria-label="État du système">
+    <div class="chip" id="c-cane"><span class="dot"></span><div><div class="k">Canne</div><div class="v" id="v-cane">—</div></div></div>
+    <div class="chip" id="c-glasses"><span class="dot"></span><div><div class="k">Lunettes</div><div class="v" id="v-glasses">—</div></div></div>
+    <div class="chip" id="c-wifi"><span class="dot"></span><div><div class="k">Wi-Fi</div><div class="v" id="v-wifi">—</div></div></div>
+    <div class="chip" id="c-batt"><span class="dot"></span><div><div class="k">Batterie</div><div class="v" id="v-batt">—</div></div></div>
+    <div class="chip" id="c-up"><span class="dot"></span><div><div class="k">En marche depuis</div><div class="v" id="v-up">—</div></div></div>
+    <div class="chip" id="c-sos"><span class="dot"></span><div><div class="k">Alerte SOS</div><div class="v" id="v-sos">Aucune</div></div></div>
+  </section>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel radar" aria-labelledby="h-radar">
+        <h2 id="h-radar">Radar de la canne</h2>
+        <p class="sub">Vue de dessus · 3 ultrasons orientés à −30°, 0° et +30° · portée affichée 2,5 m</p>
+        <svg id="radar" viewBox="0 0 600 350" role="img" aria-label="Distances mesurées par les trois capteurs de la canne"></svg>
+        <div class="legend"><span><b style="background:var(--danger)"></b>Danger &lt; 50 cm</span><span><b style="background:var(--warn)"></b>Attention 50–120 cm</span><span><b style="background:var(--free)"></b>Libre &gt; 120 cm</span></div>
+        <p class="sr" id="radar-text" aria-live="polite"></p>
+      </section>
+      <section class="panel profile" aria-labelledby="h-profile">
+        <h2 id="h-profile">Deux zones couvertes</h2>
+        <p class="sub">Vue de profil · une canne blanche classique ne détecte pas ce qui est à hauteur de tête</p>
+        <svg id="profile" viewBox="0 0 600 270" role="img" aria-label="Obstacles au sol et à hauteur de tête"></svg>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel voice" aria-labelledby="h-voice">
+        <div><h2 id="h-voice">Ce qu'entend la personne</h2><p class="sub">Messages joués dans les écouteurs</p></div>
+        <div class="said" id="said">
+          <q id="said-text">Système en attente</q>
+          <div class="meta"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span id="said-meta">Aucun message pour l'instant</span></div>
+        </div>
+        <p class="sr" aria-live="assertive" id="said-live"></p>
+        <button class="speak" id="speak" aria-pressed="false"><span aria-hidden="true">♪</span><span id="speak-lbl">Faire parler le projecteur</span></button>
+        <div class="stats">
+          <div class="stat"><div class="n" id="s-ann">0</div><div class="t">messages vocaux</div></div>
+          <div class="stat"><div class="n" id="s-high">0</div><div class="t">obstacles en hauteur</div></div>
+          <div class="stat"><div class="n" id="s-sos">0</div><div class="t">alertes SOS</div></div>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="h-log">
+        <h2 id="h-log">Journal</h2>
+        <p class="sub">Annonces et alertes, les plus récentes en haut</p>
+        <ul class="log" id="log"><li class="empty" style="display:block">En attente des messages de la canne…</li></ul>
+      </section>
+    </div>
+  </div>
+
+  <footer><span>Le guidage se fait dans la canne, sans Internet : ce tableau n'est qu'un miroir.</span><span id="foot-src">Source : MQTT/TLS via le VPS</span></footer>
+</div>
+
+<div class="sos-overlay" id="sos" role="alertdialog" aria-modal="true" aria-labelledby="sos-h">
+  <div class="ring-sos" aria-hidden="true"></div>
+  <div style="position:relative">
+    <div class="br" aria-hidden="true">⠎⠕⠎</div>
+    <h3 id="sos-h">SOS</h3>
+    <p>La personne a demandé de l'aide</p>
+    <div class="st" id="sos-st">Envoi au proche…</div>
+    <small>Cliquer ou appuyer sur Échap pour fermer</small>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const DEMO = new URLSearchParams(location.search).has("demo");
+const RANGE = 250, O = {x:300, y:336}, R = 300;   // cm affichés, origine, rayon en px
+const ZONE = d => d === null ? "free" : d < 50 ? "danger" : d < 120 ? "warn" : "free";
+const COLOR = {danger:"var(--danger)", warn:"var(--warn)", free:"var(--free)"};
+const num = x => typeof x === "number" && Number.isFinite(x);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const hhmmss = ts => new Date(ts * 1000).toLocaleTimeString("fr-FR");
+if (DEMO) document.body.classList.add("demo");
+
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const pt = (deg, r) => [O.x + r * Math.sin(deg * Math.PI / 180), O.y - r * Math.cos(deg * Math.PI / 180)];
+const wedge = (deg, half, r) => {
+  const [x1, y1] = pt(deg - half, r), [x2, y2] = pt(deg + half, r);
+  return `M${O.x},${O.y} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)} Z`;
+};
+const arcPath = (deg, half, r) => {
+  const [x1, y1] = pt(deg - half, r), [x2, y2] = pt(deg + half, r);
+  return `M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)}`;
+};
+const px = cm => Math.min(cm, RANGE) / RANGE * R;
+
+/* ---------- Radar ---------- */
+const radar = $("radar"), sensors = [];
+(function buildRadar() {
+  const defs = el("defs", {}, radar);
+  for (const [id, c] of Object.entries(COLOR)) {
+    const g = el("radialGradient", {id: "g-" + id, cx: O.x, cy: O.y, r: R, gradientUnits: "userSpaceOnUse"}, defs);
+    el("stop", {offset: "0", "stop-color": c, "stop-opacity": ".05"}, g);
+    el("stop", {offset: "1", "stop-color": c, "stop-opacity": id === "free" ? ".1" : ".35"}, g);
+  }
+  for (const [cm, cls] of [[50, "z50"], [120, "z120"], [200, ""], [250, ""]]) {
+    const r = px(cm);
+    el("path", {d: `M${O.x - r},${O.y} A${r},${r} 0 0 1 ${O.x + r},${O.y}`, class: "ring " + cls}, radar);
+    el("text", {x: O.x + r + 4, y: O.y - 4, class: "ringlbl"}, radar).textContent = cm >= 100 ? (cm / 100).toString().replace(".", ",") + " m" : cm + " cm";
+  }
+  [[-30, "G"], [0, "C"], [30, "D"]].forEach(([deg, name]) => {
+    el("path", {d: wedge(deg, 13, R), class: "cone-bg"}, radar);
+    const cone = el("path", {class: "cone"}, radar);
+    const arc = el("path", {class: "arc"}, radar);
+    const [lx, ly] = pt(deg, R + 2);
+    const lbl = el("text", {x: lx, y: ly - 6, "text-anchor": "middle", class: "lbl"}, radar);
+    lbl.textContent = name + " " + (deg > 0 ? "+" : deg < 0 ? "−" : "") + Math.abs(deg) + "°";
+    const dist = el("text", {"text-anchor": "middle", class: "dist"}, radar);
+    sensors.push({deg, cone, arc, dist});
+  });
+  // la canne, vue de dessus
+  el("circle", {cx: O.x, cy: O.y, r: 10, fill: "var(--tactile)"}, radar);
+})();
+
+function drawRadar(values, live) {
+  const words = [];
+  sensors.forEach((s, i) => {
+    const d = live && num(values[i]) ? values[i] : null;
+    const z = live ? ZONE(d) : "free";
+    const r = d === null ? R : px(d);
+    s.cone.setAttribute("d", wedge(s.deg, 13, r));
+    s.cone.setAttribute("fill", live ? `url(#g-${z})` : "#ffffff05");
+    s.arc.setAttribute("d", arcPath(s.deg, 13, Math.max(r, 30)));
+    s.arc.setAttribute("stroke", live ? COLOR[z] : "transparent");
+    s.arc.setAttribute("stroke-opacity", d === null ? ".35" : "1");
+    const [tx, ty] = pt(s.deg, R - 42);   // sous le libellé du faisceau : lisible même si l'obstacle est tout près
+    s.dist.setAttribute("x", tx); s.dist.setAttribute("y", ty);
+    s.dist.setAttribute("fill", live ? COLOR[z] : "var(--dim)");
+    s.dist.textContent = !live ? "—" : d === null ? "libre" : d + " cm";
+    words.push(["gauche", "centre", "droite"][i] + " " + (!live ? "inconnu" : d === null ? "libre" : d + " centimètres"));
+  });
+  $("radar-text").textContent = words.join(", ");
+}
+
+/* ---------- Profil ---------- */
+const prof = $("profile"), P = {};
+(function buildProfile() {
+  const G = 248, X0 = 128, W = 440;
+  el("line", {x1: 0, y1: G, x2: 600, y2: G, stroke: "var(--line-2)", "stroke-width": 2}, prof);
+  // zones
+  el("rect", {x: X0, y: 34, width: W, height: 62, rx: 10, fill: "#5aa9e60d", stroke: "#5aa9e633", "stroke-dasharray": "4 6"}, prof);
+  el("rect", {x: X0, y: 160, width: W, height: 86, rx: 10, fill: "#f2c94c0b", stroke: "#f2c94c33", "stroke-dasharray": "4 6"}, prof);
+  el("text", {x: X0 + 4, y: 24, class: "zone-txt", fill: "var(--info)"}, prof).textContent = "Zone haute · lunettes";
+  el("text", {x: X0 + 4, y: 150, class: "zone-txt", fill: "var(--tactile)"}, prof).textContent = "Zone basse · canne";
+  // silhouette
+  const body = el("g", {fill: "none", stroke: "var(--paper)", "stroke-width": 7, "stroke-linecap": "round", "stroke-linejoin": "round"}, prof);
+  el("circle", {cx: 70, cy: 62, r: 20, fill: "var(--paper)", stroke: "none"}, prof);
+  el("path", {d: "M70 88 L70 168 M70 168 L52 246 M70 168 L86 246 M70 104 L100 138"}, body);
+  el("rect", {x: 78, y: 54, width: 22, height: 9, rx: 3, fill: "var(--info)"}, prof);          // lunettes
+  el("line", {x1: 100, y1: 138, x2: 150, y2: 244, stroke: "var(--paper)", "stroke-width": 5, "stroke-linecap": "round"}, prof);
+  el("line", {x1: 141, y1: 225, x2: 150, y2: 244, stroke: "var(--danger)", "stroke-width": 5, "stroke-linecap": "round"}, prof);
+  // faisceaux et obstacles
+  P.headBeam = el("path", {class: "beam", fill: "#5aa9e622"}, prof);
+  P.lowBeam = el("path", {class: "beam", fill: "#f2c94c1c"}, prof);
+  P.headObs = el("rect", {y: 40, width: 44, height: 50, rx: 6}, prof);
+  P.lowObs = el("rect", {width: 40, rx: 6}, prof);
+  P.headTxt = el("text", {y: 116, class: "dist", "text-anchor": "middle"}, prof);
+  P.lowTxt = el("text", {y: 150, class: "dist", "text-anchor": "middle"}, prof);
+  P.X0 = X0; P.W = W; P.G = G;
+})();
+
+function drawProfile(head, glassesOk, low, live) {
+  const x = cm => P.X0 + Math.min(cm, RANGE) / RANGE * P.W;
+  const hx = glassesOk && num(head) ? x(head) : P.X0 + P.W;
+  P.headBeam.setAttribute("d", `M100 58 L${hx} 46 L${hx} 80 Z`);
+  P.headBeam.setAttribute("fill", glassesOk ? "#5aa9e626" : "#ffffff06");
+  const hz = ZONE(glassesOk && num(head) ? head : null);
+  P.headObs.setAttribute("x", hx); P.headObs.setAttribute("fill", COLOR[hz]);
+  P.headObs.style.opacity = live && glassesOk && num(head) ? 1 : 0;
+  const headHit = glassesOk && num(head);
+  P.headTxt.setAttribute("x", headHit ? Math.min(hx + 22, 540) : P.X0 + P.W - 14);
+  P.headTxt.setAttribute("y", headHit ? 116 : 86);
+  P.headTxt.setAttribute("text-anchor", headHit ? "middle" : "end");
+  P.headTxt.setAttribute("fill", glassesOk ? COLOR[hz] : "var(--dim)");
+  P.headTxt.textContent = !live ? "" : !glassesOk ? "lunettes absentes" : num(head) ? head + " cm" : "libre";
+
+  const lx = num(low) ? x(low) : P.X0 + P.W;
+  P.lowBeam.setAttribute("d", `M150 232 L${lx} 196 L${lx} 244 Z`);
+  const lz = ZONE(num(low) ? low : null);
+  P.lowObs.setAttribute("x", lx); P.lowObs.setAttribute("y", P.G - 56); P.lowObs.setAttribute("height", 56);
+  P.lowObs.setAttribute("fill", COLOR[lz]); P.lowObs.style.opacity = live && num(low) ? 1 : 0;
+  P.lowTxt.setAttribute("x", num(low) ? Math.min(lx + 20, 540) : P.X0 + P.W - 14);
+  P.lowTxt.setAttribute("y", num(low) ? P.G - 68 : 236);
+  P.lowTxt.setAttribute("text-anchor", num(low) ? "middle" : "end");
+  P.lowTxt.setAttribute("fill", live ? COLOR[lz] : "var(--dim)");
+  P.lowTxt.textContent = !live ? "" : num(low) ? low + " cm" : "libre";
+}
+
+/* ---------- Voix sur le projecteur ---------- */
+let speakOn = false;
+try { speakOn = localStorage.getItem("speak") === "1"; } catch (e) {}
+const speakBtn = $("speak");
+const canSpeak = "speechSynthesis" in window;
+function renderSpeak() {
+  speakBtn.setAttribute("aria-pressed", String(speakOn));
+  $("speak-lbl").textContent = !canSpeak ? "Synthèse vocale indisponible" : speakOn ? "Le projecteur parle · couper" : "Faire parler le projecteur";
+  speakBtn.disabled = !canSpeak;
+}
+speakBtn.addEventListener("click", () => {
+  speakOn = !speakOn;
+  try { localStorage.setItem("speak", speakOn ? "1" : "0"); } catch (e) {}
+  if (speakOn) say("Voix activée");
+  else speechSynthesis.cancel();
+  renderSpeak();
+});
+function say(text) {
+  if (!canSpeak || !speakOn) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "fr-FR"; u.rate = 1.02;
+  const fr = speechSynthesis.getVoices().find(v => v.lang && v.lang.startsWith("fr"));
+  if (fr) u.voice = fr;
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+renderSpeak();
+
+/* ---------- SOS plein écran ---------- */
+const seenSos = new Set();
+let firstLoad = true, overlayId = null, overlayTimer = null;
+function closeSos() { $("sos").classList.remove("show"); overlayId = null; }
+$("sos").addEventListener("click", closeSos);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSos(); });
+function showSos(ev) {
+  overlayId = ev.event_id;
+  $("sos").classList.add("show");
+  updateSosOverlay(ev);
+  say("Alerte S O S. La personne demande de l'aide.");
+}
+function updateSosOverlay(ev) {
+  if (overlayId !== ev.event_id) return;
+  const st = $("sos-st");
+  st.textContent = ev.confirmed ? "✓ " + ev.status : "Envoi au proche…";
+  st.className = "st" + (ev.confirmed ? " ok" : "");
+  if (ev.confirmed && !overlayTimer) overlayTimer = setTimeout(() => { overlayTimer = null; closeSos(); }, 12000);
+}
+
+/* ---------- Rendu ---------- */
+let lastSaidKey = null;
+const fmtUptime = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${String(m).padStart(2, "0")}` : m ? `${m} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`; };
+function chip(id, cls, text) { $("c-" + id).className = "chip " + cls; $("v-" + id).innerHTML = text; }
+
+function render(s) {
+  const age = s.telemetry_at ? s.now - s.telemetry_at : Infinity;
+  const live = age <= 5;
+  const t = live ? (s.telemetry || {}) : {};
+  const online = s.availability === "online";
+
+
+  chip("cane", online && live ? "ok" : online ? "warn" : s.availability === "offline" ? "bad" : "",
+       online && live ? "En ligne" : online ? "Pas de mesure récente" : s.availability === "offline" ? "Hors ligne" : "Inconnue");
+  chip("glasses", !live ? "" : t.espnow ? "ok" : "bad", !live ? "—" : t.espnow ? "Connectées" : "Absentes");
+  if (num(t.rssi)) {
+    const q = t.rssi >= -60 ? 4 : t.rssi >= -67 ? 3 : t.rssi >= -75 ? 2 : 1;
+    const bars = [6, 9, 12, 14].map((h, i) => `<i class="${i < q ? "on" : ""}" style="height:${h}px"></i>`).join("");
+    chip("wifi", q >= 3 ? "ok" : q === 2 ? "warn" : "bad", `${t.rssi} dBm <span class="bars" aria-hidden="true">${bars}</span>`);
+  } else chip("wifi", "", "—");
+  chip("batt", !num(t.battery_pct) ? "" : t.battery_pct < 20 ? "bad" : t.battery_pct < 40 ? "warn" : "ok",
+       num(t.battery_pct) ? t.battery_pct + " %" : "Non mesurée");
+  chip("up", live && num(t.uptime_s) ? "ok" : "", live && num(t.uptime_s) ? fmtUptime(t.uptime_s) : "—");
+
+  drawRadar([t.left_cm, t.center_cm, t.right_cm], live);
+  const lows = [t.left_cm, t.center_cm, t.right_cm].filter(num);
+  drawProfile(t.head_cm, !!t.espnow, lows.length ? Math.min(...lows) : null, live);
+
+  $("updated").textContent = s.telemetry_at ? "Dernière mesure " + hhmmss(s.telemetry_at) + (live ? "" : " · ancienne") : "En attente des données…";
+
+  // dernière annonce vocale
+  const said = s.events.find(e => e.type === "annonce");
+  if (said) {
+    const key = said.ts + said.message;
+    $("said-text").textContent = said.message;
+    const ago = Math.max(0, Math.round(s.now - said.ts));
+    $("said-meta").textContent = ago < 2 ? "à l'instant" : `il y a ${ago} s`;
+    if (key !== lastSaidKey) {
+      if (!firstLoad) {
+        const box = $("said"); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh");
+        $("said-live").textContent = said.message;
+        say(said.message);
+      }
+      lastSaidKey = key;
+    }
+  }
+
+  // SOS
+  const sosEvents = s.events.filter(e => e.type === "SOS");
+  const lastSos = sosEvents[0];
+  chip("sos", !lastSos ? "" : lastSos.confirmed ? "ok" : "bad",
+       !lastSos ? "Aucune" : lastSos.confirmed ? esc(lastSos.status) : "Envoi en cours…");
+  for (const ev of sosEvents) {
+    if (!seenSos.has(ev.event_id)) {
+      seenSos.add(ev.event_id);
+      if (!firstLoad && s.now - ev.ts < 120) showSos(ev);
+    }
+    updateSosOverlay(ev);
+  }
+
+  // compteurs
+  const st = s.stats || {};
+  $("s-ann").textContent = st.annonces ?? 0;
+  $("s-high").textContent = st.hauteur ?? 0;
+  $("s-sos").textContent = st.sos ?? 0;
+
+  // journal
+  const log = $("log");
+  if (!s.events.length) {
+    log.innerHTML = '<li class="empty" style="display:block">En attente des messages de la canne…</li>';
+  } else {
+    log.innerHTML = s.events.map(e => {
+      const isSos = e.type === "SOS";
+      const icon = isSos ? "SOS" : /hauteur/i.test(e.message) ? "⬆" : /stop/i.test(e.message) ? "■" : /gauche/i.test(e.message) ? "◀" : /droite/i.test(e.message) ? "▶" : /tout droit/i.test(e.message) ? "▲" : "♪";
+      const sub = isSos ? `<div class="s ${e.confirmed ? "ok" : "wait"}">${esc(e.status)}</div>` : "";
+      return `<li class="${isSos ? "sos" : ""}"><span class="ic" aria-hidden="true">${icon}</span><div><div class="m">${esc(isSos ? "Alerte SOS — " + e.message : e.message)}</div>${sub}</div><time>${hhmmss(e.ts)}</time></li>`;
+    }).join("");
+  }
+  firstLoad = false;
+}
+
+/* ---------- Source des données ---------- */
+async function fetchState() {
+  const r = await fetch(location.origin + location.pathname.replace(/[^/]*$/, "") + "api/state", {cache: "no-store"});  // URL absolue sans identifiants : fetch() refuse une URL qui en contient
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+// Mode démonstration (?demo=1) : scénario fictif, signalé par le bandeau jaune et noir.
+const demo = (() => {
+  const t0 = Date.now() / 1000, events = [], stats = {annonces: 0, hauteur: 0, sos: 0};
+  const script = [
+    [2, "Système prêt"], [7, "Obstacle à gauche"], [13, "Obstacle devant, allez à droite"],
+    [19, "Continuez tout droit"], [25, "Attention, obstacle en hauteur"], [31, "Continuez tout droit"],
+    [37, "Obstacle à droite"], [44, "Stop, obstacle"], [50, "Continuez tout droit"]];
+  let done = 0, sosDone = false;
+  return () => {
+    const now = Date.now() / 1000, el = now - t0, c = el % 60;
+    if (c < 1 && done >= script.length) { done = 0; sosDone = false; }
+    while (done < script.length && c >= script[done][0]) {
+      const msg = script[done][1];
+      events.unshift({type: "annonce", message: msg, ts: now}); stats.annonces++;
+      if (/hauteur/.test(msg)) stats.hauteur++;
+      done++;
+    }
+    if (!sosDone && c >= 54) {
+      sosDone = true; stats.sos++;
+      const ev = {type: "SOS", message: "Demande d'assistance", event_id: "demo" + Math.round(now), status: "En attente de Telegram", confirmed: false, ts: now};
+      events.unshift(ev);
+      setTimeout(() => { ev.status = "Telegram envoyé"; ev.confirmed = true; }, 2500);
+    }
+    events.length = Math.min(events.length, 50);
+    const wave = (a, p) => Math.round(a + Math.sin(el / p) * a * .7);
+    // chaque obstacle reste visible jusqu'au message suivant du scénario
+    const left = c >= 6 && c < 13 ? wave(70, 2) : c >= 13 && c < 19 ? 160 : null;
+    const center = c >= 12 && c < 19 ? wave(80, 1.5) : c >= 43 && c < 50 ? 38 : null;
+    const right = c >= 12 && c < 19 ? 60 : c >= 36 && c < 43 ? wave(75, 2) : c >= 43 && c < 50 ? 45 : null;
+    const head = c >= 24 && c < 31 ? wave(85, 1.2) : null;
+    return {now, telemetry_at: now, availability: "online", stats, events,
+      telemetry: {left_cm: left, center_cm: center, right_cm: right, head_cm: head, espnow: true,
+                  battery_pct: 78, rssi: -58 + Math.round(Math.sin(el / 5) * 4), uptime_s: el}};
+  };
+})();
+
+async function tick() {
+  $("clock").textContent = new Date().toLocaleTimeString("fr-FR");
+  try {
+    render(DEMO ? demo() : await fetchState());
+    $("foot-src").textContent = DEMO ? "Source : simulation (?demo=1)" : "Source : MQTT/TLS via le VPS";
+  } catch (e) {
+    chip("cane", "bad", "Tableau injoignable");
+  }
+}
+tick();
+setInterval(tick, 700);
+})();
+</script>
+</body>
+</html>

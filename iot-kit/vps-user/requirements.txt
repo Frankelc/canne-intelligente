@@ -1,0 +1,5 @@
+Flask==3.0.3
+paho-mqtt==2.1.0
+waitress==3.0.2
+requests==2.32.3
+cheroot==10.0.1

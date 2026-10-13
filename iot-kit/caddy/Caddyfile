@@ -1,0 +1,14 @@
+# Dashboard en HTTPS avec mot de passe, pour l'afficher au projecteur.
+# Le certificat est celui obtenu par certbot (deploy/deploy.sh) ; le port 80 reste libre pour son renouvellement.
+{
+	auto_https disable_redirects
+	admin off
+}
+
+{$DOMAIN}:443 {
+	tls /certs/fullchain.pem /certs/privkey.pem
+	basic_auth {
+		{$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+	}
+	reverse_proxy dashboard:8080
+}
