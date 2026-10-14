@@ -10,7 +10,11 @@
 #define WIFI_SSID "i14 Pro Max"
 #define WIFI_PASSWORD "prudencem"
 
-// --- Remplacer ce bloc par le contenu de deploy/config-mqtt.h généré sur le VPS ---
+// Casque audio Bluetooth : son nom (ou une partie, majuscules ignorées), tel qu'il
+// apparaît dans la liste Bluetooth d'un téléphone. Laisser "" : la canne affiche dans le
+// moniteur série les appareils trouvés, pour connaître le nom exact.
+#define BT_HEADSET_NAME ""
+
 #define MQTT_HOST ""
 #define MQTT_PORT 8883
 #define MQTT_USER "canne01"
@@ -22,7 +26,7 @@
 // 1 = se connecter sans vérifier le certificat du VPS (banc de test uniquement).
 #define MQTT_ALLOW_INSECURE 0
 
-// Batterie : pont diviseur vers une broche ADC1 libre (GPIO33, 36 ou 39 ; les GPIO 32, 34
+// Batterie (3 piles AA, mesurée sur VIN) : pont diviseur vers une broche ADC1 libre (GPIO33, 36 ou 39 ; les GPIO 32, 34
 // et 35 servent aux ultrasons). -1 = pas de mesure, le tableau de bord affiche « — ».
 #define BATTERY_ADC_PIN -1
-#define BATTERY_DIVIDER_RATIO 2.0f  // 2.0 pour deux résistances égales (ex. 100 kΩ + 100 kΩ)
+#define BATTERY_DIVIDER_RATIO 2.0f  // 2.0 pour deux résistances égales (ex. 100 kΩ + 100 kΩ) : 4,8 V -> 2,4 V sur l'ADC

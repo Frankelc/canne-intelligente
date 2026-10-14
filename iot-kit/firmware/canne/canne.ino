@@ -3,8 +3,8 @@
 //
 //  - 3 capteurs HC-SR04 (gauche, centre, droite)
 //  - réception de la distance "tête" envoyée par les lunettes (ESP-NOW)
-//  - décision : quel message dire
-//  - messages vocaux par le DFPlayer Mini (écouteurs)
+//  - décision : quel message dire 
+//  - messages vocaux envoyés en Bluetooth à un casque audio (audio.cpp)
 //  - bouton SOS (appui long) : alerte envoyée au VPS (MQTT/TLS), qui prévient Telegram
 //  - mesures et annonces envoyées au tableau de bord du VPS (iot.cpp, cœur 0)
 //
@@ -12,20 +12,22 @@
 //    Gauche : Trig GPIO 13, Echo -> pont diviseur -> GPIO 34
 //    Centre : Trig GPIO 14, Echo -> pont diviseur -> GPIO 35
 //    Droite : Trig GPIO 27, Echo -> pont diviseur -> GPIO 32
-//    DFPlayer : GPIO 17 (TX2) -> 1 kOhm -> RX ; TX -> GPIO 16 (RX2)
 //    Bouton SOS : GPIO 25 <-> GND
+//    Audio : casque Bluetooth (aucun fil), nom à indiquer dans config.h (BT_HEADSET_NAME)
 //
 //  Carte : "ESP32 Dev Module"   Moniteur série : 115200 bauds
-//  Bibliothèques : DFRobotDFPlayerMini, PubSubClient
+//  IMPORTANT : Outils -> Partition Scheme -> "Huge APP (3MB No OTA/1MB SPIFFS)"
+//              (Bluetooth + messages vocaux : le programme dépasse la taille par défaut)
+//  Bibliothèques : PubSubClient, ESP32-A2DP (pschatzmann, depuis GitHub)
 //  Configuration : copier config.example.h en config.h (Wi-Fi + bloc MQTT du VPS)
 // ============================================================
 
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-#include <DFRobotDFPlayerMini.h>
 #include "config.h"   // Wi-Fi et VPS (le jeton Telegram reste sur le VPS, jamais dans la canne)
 #include "iot.h"
+#include "audio.h"
 
 // ------------------------------------------------------------
 //  Broches
@@ -37,8 +39,6 @@ const int ECHO[NB_CAPTEURS] = {34, 35, 32};
 const char* NOM[NB_CAPTEURS] = {"G", "C", "D"};
 
 const int BOUTON_SOS = 25;
-const int DF_RX = 16;   // reçoit le TX du DFPlayer
-const int DF_TX = 17;   // envoie vers le RX du DFPlayer (via 1 kOhm)
 
 // ------------------------------------------------------------
 //  Réglages
@@ -52,22 +52,21 @@ const unsigned long MIN_ENTRE_MESSAGES = 1500;  // ms entre deux messages diffé
 const unsigned long REPETITION_MS      = 3000;  // ms avant de répéter le même message
 const unsigned long LUNETTES_TIMEOUT   = 1500;  // ms sans nouvelles : lunettes absentes
 const unsigned long DUREE_APPUI_SOS    = 1500;  // ms d'appui pour déclencher le SOS
-const int VOLUME = 20;                          // volume du DFPlayer (0 à 30)
 
 // ------------------------------------------------------------
-//  Messages : numéro du fichier dans le dossier mp3 de la carte SD
+//  Messages : numéro du message vocal dans audio_clips.h
 // ------------------------------------------------------------
 const int MSG_AUCUN         = 0;
-const int MSG_OBST_GAUCHE   = 1;   // 0001.mp3 « Obstacle à gauche »
-const int MSG_OBST_DROITE   = 2;   // 0002.mp3 « Obstacle à droite »
-const int MSG_ALLER_GAUCHE  = 3;   // 0003.mp3 « Obstacle devant, allez à gauche »
-const int MSG_ALLER_DROITE  = 4;   // 0004.mp3 « Obstacle devant, allez à droite »
-const int MSG_STOP          = 5;   // 0005.mp3 « Stop, obstacle »
-const int MSG_HAUTEUR       = 6;   // 0006.mp3 « Attention, obstacle en hauteur »
-const int MSG_TOUT_DROIT    = 7;   // 0007.mp3 « Continuez tout droit »
-const int MSG_ALERTE_OK     = 8;   // 0008.mp3 « Alerte envoyée »
-const int MSG_PRET          = 9;   // 0009.mp3 « Système prêt »
-const int MSG_ALERTE_ECHEC  = 10;  // 0010.mp3 « Alerte non envoyée »
+const int MSG_OBST_GAUCHE   = 1;   // « Obstacle à gauche »  (oreille gauche)
+const int MSG_OBST_DROITE   = 2;   // « Obstacle à droite »  (oreille droite)
+const int MSG_ALLER_GAUCHE  = 3;   // « Obstacle devant, allez à gauche »
+const int MSG_ALLER_DROITE  = 4;   // « Obstacle devant, allez à droite »
+const int MSG_STOP          = 5;   // « Stop, obstacle »
+const int MSG_HAUTEUR       = 6;   // « Attention, obstacle en hauteur »
+const int MSG_TOUT_DROIT    = 7;   // « Continuez tout droit »
+const int MSG_ALERTE_OK     = 8;   // « Alerte envoyée »
+const int MSG_PRET          = 9;   // « Système prêt » (dit quand le casque se connecte)
+const int MSG_ALERTE_ECHEC  = 10;  // « Alerte non envoyée »
 
 // Texte de chaque message, pour le journal du tableau de bord.
 const char* TEXTE_MSG[] = {
@@ -92,9 +91,7 @@ volatile unsigned long teteDerniereReception = 0;
 // ------------------------------------------------------------
 //  Variables
 // ------------------------------------------------------------
-HardwareSerial dfSerial(2);
-DFRobotDFPlayerMini df;
-bool dfOk = false;
+bool casqueConnecte = false;
 
 long historique[NB_CAPTEURS][3];   // 3 dernières mesures de chaque capteur
 int  indexHisto[NB_CAPTEURS] = {0, 0, 0};
@@ -223,6 +220,12 @@ void demarrerRadio() {
 
 void declencherSOS() {
   Serial.println(">>> SOS declenche");
+  // VPS non configuré : aucune alerte ne pourra partir, on le dit tout de suite.
+  if (!iotIsConfigured()) {
+    Serial.println(">>> VPS non configure (config.h) : alerte impossible");
+    jouer(MSG_ALERTE_ECHEC);
+    return;
+  }
   if (!iotSosPending()) iotRequestSos();   // sinon : alerte déjà en cours d'envoi
   // Sans Wi-Fi, on prévient tout de suite ; l'envoi reste tenté si le réseau revient.
   if (WiFi.status() != WL_CONNECTED) jouer(MSG_ALERTE_ECHEC);
@@ -281,7 +284,10 @@ int decider(long g, long c, long d, long tete) {
 }
 
 void jouer(int msg) {
-  if (dfOk) df.playMp3Folder(msg);
+  int cote = COTE_DEUX;
+  if (msg == MSG_OBST_GAUCHE) cote = COTE_GAUCHE;
+  if (msg == MSG_OBST_DROITE) cote = COTE_DROITE;
+  audioPlay(msg, cote);
   dernierMessage = msg;
   dernierMessageMs = millis();
   Serial.printf("    [voix] message %d\n", msg);
@@ -330,7 +336,7 @@ void afficherEtat(int msg) {
   } else {
     Serial.print("Tete: (lunettes absentes)  ");
   }
-  Serial.printf("-> decision %d\n", msg);
+  Serial.printf("Casque: %s  -> decision %d\n", casqueConnecte ? "ok" : "--", msg);
 }
 
 // ============================================================
@@ -351,20 +357,34 @@ void setup() {
   }
   pinMode(BOUTON_SOS, INPUT_PULLUP);
 
-  dfSerial.begin(9600, SERIAL_8N1, DF_RX, DF_TX);
-  dfOk = df.begin(dfSerial);
-  if (dfOk) {
-    df.volume(VOLUME);
-    Serial.println("DFPlayer pret");
-  } else {
-    Serial.println("DFPlayer non detecte : verifier TX/RX, l'alimentation et la carte SD (fonctionnement sans voix)");
-  }
-
   demarrerRadio();
   iotBegin();
 
-  jouer(MSG_PRET);
-  delay(1500);
+  // La connexion TLS au VPS demande un grand bloc de mémoire d'un seul tenant :
+  // on l'ouvre AVANT le Bluetooth, qui en consomme beaucoup (20 s au plus).
+  if (iotIsConfigured() && WiFi.status() == WL_CONNECTED) {
+    Serial.println("Connexion au VPS avant le Bluetooth...");
+    unsigned long t = millis();
+    while (!iotIsConnected() && millis() - t < 20000) delay(100);
+  }
+  Serial.printf("[memoire] avant Bluetooth : libre=%u, plus grand bloc=%u\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  audioBegin(BT_HEADSET_NAME);
+  Serial.printf("[memoire] apres Bluetooth : libre=%u, plus grand bloc=%u\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
+
+// Annonce « Système prêt » à chaque connexion du casque.
+void suivreCasque() {
+  const bool connecte = audioConnected();
+  if (connecte && !casqueConnecte) {
+    Serial.println(">>> Casque Bluetooth connecte");
+    casqueConnecte = true;
+    jouer(MSG_PRET);
+  } else if (!connecte && casqueConnecte) {
+    Serial.println(">>> Casque Bluetooth deconnecte");
+    casqueConnecte = false;
+  }
 }
 
 void loop() {
@@ -381,4 +401,5 @@ void loop() {
 
   iotSetState(distance[GAUCHE], distance[CENTRE], distance[DROITE], tete, lunettesConnectees());
   suivreSOS();
+  suivreCasque();
 }

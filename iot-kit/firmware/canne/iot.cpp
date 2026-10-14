@@ -47,9 +47,10 @@ int batteryPercent() {
   uint32_t sum = 0;
   for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(BATTERY_ADC_PIN);
   const float volts = sum / 16.0f / 1000.0f * BATTERY_DIVIDER_RATIO;
-  // Courbe de décharge approximative d'un élément Li-ion 18650.
-  static const float table[][2] = {{3.30f, 0}, {3.50f, 10}, {3.60f, 20}, {3.70f, 35},
-                                   {3.80f, 50}, {3.90f, 65}, {4.00f, 80}, {4.10f, 90}, {4.20f, 100}};
+  // Courbe de décharge approximative de 3 piles alcalines AA en série (4,8 V neuves).
+  // 0 % à 4,2 V : en dessous, l'ESP32 et les HC-SR04 deviennent instables.
+  static const float table[][2] = {{4.20f, 0}, {4.30f, 15}, {4.40f, 35}, {4.50f, 55},
+                                   {4.60f, 75}, {4.70f, 90}, {4.80f, 100}};
   if (volts <= table[0][0]) return 0;
   for (size_t i = 1; i < sizeof(table) / sizeof(table[0]); i++) {
     if (volts <= table[i][0]) {
@@ -86,7 +87,11 @@ void maintainMqtt() {
     mqtt.subscribe(topic("sos/ack").c_str(), 1);
     Serial.println("[iot] MQTT connecté au VPS (TLS)");
   } else {
-    Serial.printf("[iot] MQTT échec, état=%d\n", mqtt.state());
+    char erreurTls[100] = "";
+    const int codeTls = tlsClient.lastError(erreurTls, sizeof(erreurTls));
+    Serial.printf("[iot] MQTT échec, état=%d, TLS=%d (%s), mémoire libre=%u, plus grand bloc=%u\n",
+                  mqtt.state(), codeTls, erreurTls, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
 }
 
@@ -212,6 +217,14 @@ void iotBegin() {
   mqtt.setKeepAlive(20);
   mqtt.setSocketTimeout(5);
   xTaskCreatePinnedToCore(iotTask, "iot", 12288, nullptr, 1, nullptr, 0);
+}
+
+bool iotIsConfigured() {
+  return tlsReady;
+}
+
+bool iotIsConnected() {
+  return mqtt.connected();
 }
 
 void iotSetState(long gaucheCm, long centreCm, long droiteCm, long teteCm, bool lunettesOk) {

@@ -8,6 +8,13 @@
 // À appeler dans setup(), après demarrerRadio().
 void iotBegin();
 
+// true si la liaison au VPS est configurée (MQTT_HOST et certificat, ou mode non vérifié).
+// false : SOS et tableau de bord impossibles, la canne guide seulement.
+bool iotIsConfigured();
+
+// true quand la connexion MQTT/TLS au VPS est établie.
+bool iotIsConnected();
+
 // État courant pour le dashboard. Distances en cm, -1 = rien détecté.
 void iotSetState(long gaucheCm, long centreCm, long droiteCm, long teteCm, bool lunettesOk);
 
