@@ -1,101 +1,91 @@
-# Partie IoT — choix d'architecture, raisons et travaux restants
+# Partie IoT : choix d'architecture, raisons et limites
 
-**Projet :** IFRI · Certification SEIoT · Projet 3 — Canne et lunettes intelligentes  
-**État :** dossier de conception et kit de démarrage. Le kit n'est pas encore déployé sur le VPS ni intégré à vos firmwares définitifs.
+**Projet :** IFRI · Certification SEIoT · Projet 3 : canne et lunettes intelligentes
+**État :** architecture finale déployée sur le VPS et validée sur le matériel, SOS Telegram compris.
 
 ## 1. Résumé des décisions
 
-| Sujet | Choix retenu pour le prototype | Pourquoi | Autres possibilités |
+| Sujet | Choix retenu | Pourquoi | Autres possibilités |
 |---|---|---|---|
-| Communication lunettes → canne | ESP-NOW | Lien direct entre les deux cartes, sans routeur ni Internet. Convient aux petites mesures envoyées régulièrement. | Wi-Fi TCP/UDP demande un point d'accès; câble est simple mais gêne la mobilité; BLE ajoute une pile et une mise au point supplémentaires. |
-| Accès Internet | Wi-Fi sur l'ESP32 de la canne | La canne est le point central; un seul appareil doit joindre le VPS. | Modem GSM/LTE ajoute matériel, coût, carte SIM et consommation; partage de connexion du téléphone suffit pour la démonstration. |
-| Protocole canne → VPS | MQTT | Léger, publication par sujets, abonnements simultanés du dashboard et du relais Telegram, gestion de présence et qualité de service. | HTTP/REST est simple pour envoyer une requête isolée, mais il faut construire autour la diffusion temps réel, les abonnements et les reconnexions. |
-| Courtier MQTT | Mosquitto sur VPS | Open source, léger et adapté à un seul prototype; le groupe contrôle les données et les comptes. | Broker hébergé simplifie l'exploitation mais dépend d'un fournisseur et peut imposer un compte/quotas; ThingsBoard/Cloud demande moins d'administration mais réduit la maîtrise. |
-| Dashboard | Petite page web Flask abonnée à MQTT | Suffisant pour quelques valeurs et événements, déployé avec les mêmes services Docker; pas de flow à maintenir. | Node-RED est plus visuel et rapide pour construire des flows; c'est un bon choix si le formateur l'exige ou si le dashboard doit être étendu. Grafana est pertinent pour des historiques, mais demande une base de données. |
-| Alerte | Le VPS reçoit le sujet SOS et appelle le bot Telegram | Le token reste côté serveur, le firmware reste simple, et la même arrivée MQTT peut être journalisée ou montrée à l'écran. | Appel direct Telegram par l'ESP32 évite le bridge, mais expose le token dans le firmware et lie le code embarqué au service externe. |
-| Deux comptes MQTT | `canne01` publie; `dashboard` lit | Réduit les droits de chaque client et évite que le tableau de bord publie des commandes à la canne. | Un compte unique est plus simple au début, mais donne trop de droits et complique la rotation des secrets. |
-| Sécurité du transport | TLS côté appareil vers le VPS; trafic en clair réservé au réseau Docker privé | Protège les identifiants et messages sur Internet sans imposer TLS entre conteneurs locaux. Seul 8883 est publié par la configuration. | HTTP/MQTT en clair est plus simple au banc, mais ne convient pas à une connexion publique. MQTT sur VPN est une autre bonne solution si le VPN existe déjà. |
-| Guidage | Décision et audio sur la canne, indépendants du VPS | La latence et Internet ne doivent pas arrêter les annonces locales. MQTT sert à la supervision et au SOS distant. | Décider sur le serveur introduirait délai, dépendance réseau et panne de guidage hors ligne. |
+| Voix | Casque Bluetooth (A2DP) piloté par la canne, clips vocaux en mémoire flash | Aucun fil vers l'oreille ; un obstacle sur le côté est annoncé dans l'oreille correspondante ; plus de carte SD ni de module audio à câbler | Le DFPlayer (module MP3 + carte micro-SD) de la première version n'est plus utilisé |
+| Liaison canne ↔ lunettes | ESP-NOW | Lien direct entre les deux cartes, sans routeur, en quelques millisecondes | Wi-Fi TCP/UDP demande un point d'accès ; un câble gêne la mobilité ; BLE ajoute une pile de plus |
+| Accès Internet | **Wi-Fi des lunettes** (passerelle) | La canne n'a pas assez de mémoire pour le Bluetooth audio et TLS en même temps ; les lunettes ont toute leur mémoire libre | Modem GSM/LTE : matériel, carte SIM et consommation en plus ; le partage de connexion du téléphone suffit au prototype |
+| Protocole vers le VPS | MQTT/TLS | Léger ; un message publié une fois est reçu par le tableau de bord et le relais Telegram ; présence (Last Will) intégrée | HTTP convient à une requête isolée, mais il faudrait reconstruire la diffusion en direct et les reconnexions |
+| Courtier MQTT | Mosquitto sur le VPS | Open source, léger ; le groupe garde la maîtrise des comptes et des données | Un courtier hébergé dépend d'un fournisseur et de ses quotas |
+| Tableau de bord | Page Flask abonnée à MQTT | Suffisant pour quelques valeurs en direct ; tourne sans `sudo`, sans base de données, sans étape de compilation | Node-RED plus visuel ; Grafana utile pour des historiques, mais demande une base de données |
+| Alerte | Le VPS reçoit le SOS et appelle le bot Telegram | Le jeton du bot reste sur le serveur, jamais dans un firmware | Un appel direct par l'ESP32 exposerait le jeton et demanderait du TLS supplémentaire |
+| Comptes MQTT | `canne01` (passerelle), `telegram`, `dashboard` | Chacun a les droits minimaux ; le tableau de bord ne peut rien publier | Un compte unique donne trop de droits |
+| Sécurité | TLS de bout en bout sur Internet (8883 et 8443), mot de passe sur le tableau de bord | Identifiants et messages protégés sur le réseau public | MQTT en clair acceptable au banc de test seulement |
+| Guidage | Décision et voix dans la canne, indépendantes du réseau | Le guidage ne doit ni attendre ni dépendre d'Internet | Décider sur le serveur ajouterait du délai et une panne de guidage hors ligne |
 
 ## 2. Architecture retenue
 
 ```text
-HC-SR04 tête → ESP32 lunettes
-             │ ESP-NOW
-             ▼
-Ultrasons → ESP32 canne → audio local / vibration
-                  │ Wi-Fi + MQTT/TLS
-                  ▼
-             VPS Mosquitto
-               ├── dashboard web (lecture seule)
-               └── relais Telegram (lecture SOS)
+                       ESP-NOW (mesures, annonces, SOS)
+Casque ◄── Bluetooth ── CANNE ◄──────────────────────────► LUNETTES ── Wi-Fi + MQTT/TLS 8883 ──► VPS 185.215.164.23
+            (voix)      3 ultrasons                         ultrason tête                        ├── Mosquitto
+                        décision                            passerelle                           ├── relais Telegram ──► proche
+                        bouton SOS        ◄── état du VPS, confirmation SOS ──                   └── tableau de bord HTTPS 8443
 ```
 
-La canne est la passerelle. Les lunettes n'ont pas besoin de se connecter au routeur. La canne garde la responsabilité des annonces vocales et des décisions locales. En cas de perte Internet, elle doit toujours détecter et annoncer localement ; le dashboard et Telegram deviennent temporairement indisponibles.
+**Pourquoi la passerelle est dans les lunettes.** Au départ, la canne faisait tout. Avec le Bluetooth audio actif, il ne restait que 13 184 octets de mémoire libre, alors qu'une connexion TLS en demande bien plus : la canne échouait à joindre le VPS. En déplaçant le Wi-Fi et TLS dans les lunettes, la canne remonte à 72 924 octets libres et chaque carte fait ce qu'elle peut faire de manière fiable.
 
-### Point radio à vérifier
+**Ce que fait chaque carte.**
 
-La connexion Wi-Fi de la canne et ESP-NOW partagent la radio et le canal Wi-Fi. Règle de l'équipe : au démarrage, canne et lunettes cherchent le réseau `WIFI_SSID` et se placent sur son canal (canal 1 sinon). Le partage de connexion doit donc être actif avant l'allumage et garder son canal. La veille radio de la canne est désactivée (`WiFi.setSleep(false)`), sinon des paquets ESP-NOW sont perdus. Si le Wi-Fi est absent au démarrage, la canne guide seule, sans SOS ni dashboard, jusqu'au redémarrage suivant.
+- **Canne** : mesure gauche/centre/droite, reçoit la distance tête, décide et parle dans le casque. Elle envoie aux lunettes ses mesures (toutes les 300 ms), chaque annonce jouée et la demande de SOS.
+- **Lunettes** : mesurent la hauteur de tête (toutes les 100 ms), l'envoient à la canne avec l'état du VPS et le numéro du dernier SOS confirmé, et publient tout sur le VPS.
 
-## 3. Pourquoi MQTT pour ce projet
+**Conséquence pour la supervision.** Le message `availability` (`online`/`offline`, Last Will) décrit désormais la **passerelle**. L'état de la canne vient du champ `espnow` de la télémétrie, celui du casque du champ `headset`. Quand la passerelle est hors ligne, le tableau de bord indique que l'état de la canne n'est plus connu, sans prétendre qu'elle est en panne : elle continue de guider.
 
-Le projet a plusieurs consommateurs des mêmes données : écran de supervision, journal d'événements, relais Telegram. Avec MQTT, l'ESP32 publie une fois sous un sujet et chacun des services concernés s'abonne. Les sujets séparent les usages (`telemetry`, `event`, `sos`, `availability`) et évitent de faire appeler directement le dashboard depuis le firmware.
+### Point radio
 
-MQTT ne rend pas automatiquement le SOS fiable, et PubSubClient ne publie qu'en QoS 0. Le SOS repose donc sur un accusé applicatif : la canne réémet le même `event_id` toutes les 5 s jusqu'à recevoir `sos/ack`. Le relais déduplique les identifiants (liste conservée sur disque) et n'envoie l'accusé qu'une fois le message accepté par Telegram.
+Le Wi-Fi des lunettes et ESP-NOW partagent la même radio, donc le même canal. Au démarrage, les lunettes se connectent au partage de connexion du téléphone ; la canne cherche ce même réseau (`WIFI_SSID`, sans s'y connecter) et se place sur son canal. Le partage doit donc être actif avant d'allumer les cartes et garder son canal pendant la démo.
 
-HTTP serait une bonne alternative si le seul besoin était d'envoyer occasionnellement un SOS à une API web. Pour le flux périodique et les abonnés dashboard + Telegram, le broker MQTT est plus adapté au périmètre du projet.
+## 3. Pourquoi MQTT
 
-## 4. Pourquoi le dashboard est une page Flask
+Plusieurs services consomment les mêmes données : le tableau de bord, le journal et le relais Telegram. Avec MQTT, la passerelle publie une fois par sujet et chaque service s'abonne. Les sujets séparent les usages (`telemetry`, `event`, `sos`, `sos/ack`, `availability`).
 
-La page incluse est une démonstration simple : elle reçoit les sujets MQTT et affiche les dernières distances, l'état ESP-NOW et les événements. Elle n'ajoute pas de base de données ni de service externe. C'est proportionné au parcours de démonstration et au délai annoncé.
+MQTT ne rend pas le SOS fiable à lui seul, et PubSubClient ne publie qu'en QoS 0. Le SOS repose donc sur un accusé applicatif : les lunettes republient le même `event_id` (8 caractères hexadécimaux, un tiret, le numéro de SOS) toutes les 5 s jusqu'à recevoir `sos/ack`. Le relais élimine les doublons (liste conservée sur disque) et n'envoie l'accusé qu'une fois le message accepté par Telegram. La canne ne dit « Alerte envoyée » qu'à ce moment-là : elle ne promet jamais une alerte qui n'est pas partie.
 
-Limites assumées : l'historique est gardé en mémoire et disparaît au redémarrage; les valeurs ne sont pas un historique de mesure certifié; l'accès public passe par Caddy (HTTPS + mot de passe) sur `https://DOMAIN`. Si l'équipe a besoin de courbes sur plusieurs jours, alertes configurables ou un éditeur visuel, Node-RED et une base de données deviennent plus intéressants.
+## 4. Pourquoi un tableau de bord Flask
 
-Le dashboard n'invente pas les champs manquants : les distances gauche/centre/droite et la batterie resteront vides tant que le firmware ne les publie pas avec les noms attendus (`left_cm`, `center_cm`, `right_cm`, `battery_pct`).
+La page reçoit les sujets MQTT et affiche l'état en direct. Le VPS n'offre ni `sudo` ni Node : une page en HTML, CSS et JavaScript simples, servie par Flask en HTTPS, ne demande aucune installation système ni étape de compilation.
 
-## 5. Pourquoi envoyer Telegram depuis le VPS
+Elle montre la chaîne de liaison complète (casque, canne, passerelle, VPS, Telegram), le radar avec les vrais seuils de la canne, la vue de profil tête/sol, le dernier message vocal, le journal et les SOS. Elle propose un mode projecteur (fond clair, texte agrandi) et un mode simulation (`?demo=1`) pour répéter sans matériel.
 
-Le jeton Telegram est une clé secrète. Le garder sur le VPS évite de l'inclure dans le firmware diffusé, les dépôts, les captures ou les binaires. Le VPS reçoit seulement le sujet MQTT `.../sos`, valide le type d'événement, limite les répétitions rapprochées et appelle la Bot API Telegram.
+Limites assumées : l'historique est gardé en mémoire et disparaît au redémarrage ; ce n'est pas un enregistrement certifié des mesures.
 
-L'anti-répétition du bridge fourni est en mémoire : les identifiants déjà vus sont oubliés au redémarrage. Pour un prototype, c'est suffisant pour une démonstration; pour un système plus fiable, enregistrer les IDs traités dans un stockage persistant et faire remonter une confirmation au dispositif. Il faut aussi distinguer dans l'audio « SOS publié » de « proche notifié » : la canne ne peut pas promettre que Telegram a livré le message sans retour applicatif.
+## 5. Pourquoi Telegram passe par le VPS
+
+Le jeton du bot est une clé secrète. Il reste sur le VPS : il n'apparaît dans aucun firmware, document ni capture. Le relais valide le message, limite les alertes rapprochées (30 s) et n'affiche jamais le jeton dans ses journaux.
 
 ## 6. Ce qui est en place
 
-- Installation du VPS en une commande (`deploy/deploy.sh`) : Docker, certificat Let's Encrypt renouvelé automatiquement, pare-feu, comptes, ACL.
-- Trois comptes MQTT aux droits minimaux (canne, relais Telegram, dashboard) ; chaque conteneur ne reçoit que ses propres secrets.
-- MQTT uniquement en TLS depuis Internet (port 8883) ; le firmware vérifie le certificat du broker (ISRG Root X1).
-- SOS fiable de bout en bout : réémission par la canne, accusé du relais, déduplication persistante, mention du retard dans Telegram, plusieurs destinataires possibles.
-- Le jeton Telegram n'apparaît jamais dans les journaux (les erreurs réseau ne sont pas affichées en entier).
-- Dashboard en HTTPS avec mot de passe : distances, lunettes, batterie, signal Wi-Fi, état en ligne/hors ligne, détection des données périmées, journal des annonces et suivi de chaque SOS.
-- Firmware canne : programme de l'équipe relié au VPS ; réseau dans une tâche séparée (cœur 0), jamais bloquant pour le guidage ; jeton Telegram retiré du firmware ; reconnexion MQTT automatique ; mesure batterie optionnelle.
-- Firmware lunettes : programme de l'équipe, inchangé.
-- Test du SOS depuis le VPS sans ESP32 (`deploy/test-sos.sh`).
+- VPS partagé sans droits administrateur : Mosquitto, relais Telegram et tableau de bord dans `~/iot-canne`, redémarrage automatique par la crontab.
+- MQTT uniquement en TLS depuis Internet (8883) ; le firmware des lunettes vérifie le certificat du VPS.
+- Trois comptes MQTT aux droits minimaux.
+- SOS fiable de bout en bout : réémission par la passerelle, accusé du relais, élimination des doublons, mention du retard dans Telegram, confirmation vocale sur la canne.
+- Canne : voix Bluetooth stéréo, annonces avec seuils et marge anti-clignotement, aucun besoin d'Internet.
+- Lunettes : capteur tête et passerelle, tâche réseau sur un cœur séparé, reconnexion automatique.
+- Tableau de bord HTTPS avec mot de passe, mode projecteur et mode simulation.
 
-## 7. Ce qui reste à faire
+## 7. Limites du prototype
 
-- **R1** : câbler le pont diviseur de la batterie si la mesure doit apparaître au dashboard, et renseigner les broches réelles.
-- **Équipe** : créer le domaine, démarrer le bot Telegram, lancer `deploy.sh` sur le VPS, enregistrer `0010.mp3` (« Alerte non envoyée ») sur la carte SD si ce n'est pas fait.
-- **Limites assumées du prototype** : un SOS en attente est perdu si la canne redémarre ; la liaison ESP-NOW n'est pas chiffrée (filtrée par le code `CANE`) ; l'historique du dashboard est en mémoire.
+- Un SOS en attente est perdu si la **canne** redémarre avant l'accusé (son numéro est en mémoire vive). Un redémarrage des lunettes, lui, ne le perd pas : la canne continue de le demander tant qu'elle n'a pas de confirmation.
+- La liaison ESP-NOW n'est pas chiffrée ; elle est seulement filtrée par le code `CANE`.
+- Le certificat du VPS est signé par une autorité propre au projet : le navigateur affiche un avertissement la première fois.
+- La batterie des lunettes n'est mesurée que si le pont diviseur est câblé (`BATTERY_ADC_PIN`).
+- Le système dépend du partage de connexion d'un téléphone pour la supervision et le SOS ; le guidage, lui, n'en dépend pas.
 
-## 8. Ce qui n'a pas pu être vérifié
+## 8. Plan de validation (rejouable avant la démo)
 
-- Les firmwares n'ont pas été compilés (pas d'arduino-cli sur le poste de préparation) : compiler dans l'Arduino IDE avec le cœur ESP32 3.x.
-- La pile Docker n'a pas été lancée de bout en bout ; la logique du relais et du dashboard a été testée avec MQTT et Telegram simulés.
-
-## 9. Plan court de validation
-
-1. **PC → VPS :** connexion MQTT TLS avec l'utilisateur `canne01`; vérifier que l'ACL autorise la publication et que le dashboard reçoit un JSON exemple.
-2. **SOS côté VPS :** publier un payload SOS de test; vérifier une notification Telegram, puis tester l'anti-doublon.
-3. **ESP32 canne → VPS :** joindre le Wi-Fi et le broker, publier un message; vérifier TLS, reconnexion et affichage.
-4. **Lunettes → canne en simultané :** démarrer ESP-NOW pendant que Wi-Fi/MQTT est actif et vérifier la fraîcheur de la mesure ToF.
-5. **Bouton physique :** appui long → annonce locale immédiate + événement distant, sans blocage du cycle capteurs.
-6. **Mode dégradé :** couper Internet et VPS; la détection et l'audio doivent continuer localement; reconnecter et vérifier le comportement SOS en attente/reprise.
-7. **Démo :** confirmer que toutes les valeurs affichées proviennent des mesures, tester le parcours accompagné et expliquer les limites du prototype.
-
-## 10. Recommandation de périmètre
-
-Pour le délai de cinq jours, garder l'IoT à trois résultats démontrables : (1) le VPS reçoit la télémétrie MQTT, (2) le dashboard affiche les mesures de la canne, (3) un SOS déclenche Telegram. Ne pas ajouter GPS, historique complexe, commandes distantes ou application mobile tant que ces trois scénarios ne sont pas testés. La partie mobilité reste locale et doit être présentée comme prototype expérimental.
+1. **VPS** : `bash ~/iot-canne/run.sh status`, puis `bash ~/iot-canne/test-sos.sh` : une notification Telegram doit arriver.
+2. **Passerelle** : allumer le partage, puis les lunettes ; le tableau de bord passe « Passerelle : en ligne ».
+3. **Canne** : allumer la canne ; « Canne : joignable », puis « Casque : connecté » et l'annonce « Système prêt ».
+4. **Guidage** : présenter un obstacle devant, sur les côtés, puis à hauteur de tête ; vérifier les annonces dans le casque et sur le tableau de bord.
+5. **SOS** : appui long sur le bouton ; alerte plein écran, notification unique sur Telegram, « Alerte envoyée » dans le casque.
+6. **Mode dégradé** : couper le partage ; la canne continue de guider, le tableau de bord affiche « Passerelle hors ligne ».
 
 ---
 
-Les secrets d'accès et les données personnelles ne doivent pas figurer dans ce document. Remplir les paramètres directement sur le VPS et dans les fichiers locaux non versionnés.
+Aucun secret ni aucune donnée personnelle ne figure dans ce document. Les paramètres se renseignent directement sur le VPS et dans les `config.h` locaux, jamais publiés.

@@ -1,4 +1,5 @@
 #include "audio.h"
+#include <Preferences.h>
 #include "BluetoothA2DPSource.h"
 #include "audio_clips.h"
 
@@ -56,13 +57,20 @@ int32_t fournirSon(Frame *trames, int32_t n) {
 }
 
 // Appelée pour chaque appareil Bluetooth trouvé : true = s'y connecter.
+// Nom EXACT exigé (majuscules et espaces autour ignorés) : la canne ne se connecte qu'au
+// casque choisi, jamais à un appareil dont le nom ne fait que lui ressembler.
 bool appareilTrouve(const char *nom, esp_bd_addr_t adresse, int rssi) {
-  Serial.printf("[audio] appareil Bluetooth trouve : \"%s\" (signal %d)\n", nom, rssi);
-  if (strlen(nomRecherche) == 0) return false;
+  if (strlen(nomRecherche) == 0) {
+    Serial.printf("[audio] appareil Bluetooth trouve : \"%s\" (signal %d)\n", nom, rssi);
+    return false;
+  }
   String a = nom, b = nomRecherche;
-  a.toLowerCase();
-  b.toLowerCase();
-  return a.indexOf(b) >= 0;   // une partie du nom suffit
+  a.trim();
+  b.trim();
+  const bool cestLui = a.equalsIgnoreCase(b);
+  Serial.printf("[audio] appareil Bluetooth trouve : \"%s\" (signal %d)%s\n", nom, rssi,
+                cestLui ? " -> c'est le casque, connexion" : " -> ignore");
+  return cestLui;
 }
 
 }  // namespace
@@ -74,9 +82,26 @@ void audioBegin(const char *nomCasque) {
   } else {
     Serial.printf("[audio] recherche du casque \"%s\"...\n", nomCasque);
   }
+  // La bibliothèque retient l'adresse du dernier casque (mémoire permanente, espace
+  // "connected_bda", clé "src_bda") et s'y reconnecte en priorité. Si le nom configuré a
+  // changé, on efface cette adresse pour chercher directement le nouveau casque.
+  // (clean_last_connection() de la bibliothèque n'efface rien avant start().)
+  Preferences prefs;
+  prefs.begin("canne", false);
+  if (prefs.getString("nom_casque", "") != String(nomCasque)) {
+    Preferences bda;
+    if (bda.begin("connected_bda", false)) {
+      bda.remove("src_bda");
+      bda.end();
+    }
+    prefs.putString("nom_casque", nomCasque);
+    Serial.println("[audio] nouveau casque configure : l'ancien casque est oublie");
+  }
+  prefs.end();
+
   a2dp.set_local_name("Canne IFRI");
   a2dp.set_ssid_callback(appareilTrouve);
-  a2dp.set_auto_reconnect(true);
+  a2dp.set_auto_reconnect(true, 5);   // 5 essais sur le dernier casque, puis recherche par nom
   a2dp.set_data_callback_in_frames(fournirSon);
   a2dp.set_volume(100);   // 0 à 127
   a2dp.start();

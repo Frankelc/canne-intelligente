@@ -15,7 +15,6 @@ struct MessageEvent {
 constexpr uint32_t MQTT_RETRY_MS = 5000;
 constexpr uint32_t TELEMETRY_PERIOD_MS = 1000;
 constexpr uint32_t SOS_RETRY_MS = 5000;
-constexpr uint32_t SOS_LATE_MS = 20000;
 constexpr uint32_t SOS_EXPIRY_MS = 30UL * 60UL * 1000UL;
 
 WiFiClientSecure tlsClient;
@@ -24,16 +23,18 @@ bool tlsReady = false;
 
 portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 long distances[4] = {-1, -1, -1, -1};  // gauche, centre, droite, tête
-bool glassesOk = false;
+bool canneOk = false;    // la canne a envoyé ses mesures récemment (ESP-NOW)
+bool casqueOk = false;   // casque Bluetooth connecté à la canne
 
 QueueHandle_t messageQueue;
 
-volatile bool sosRequested = false;
+// SOS : numéro choisi par la canne (1 à 255). Les lunettes le publient sur le VPS
+// jusqu'à l'accusé de réception, puis renvoient ce numéro à la canne (sosConfirmedNumber).
+volatile uint8_t sosRequestedNumber = 0;
+volatile uint8_t sosCurrentNumber = 0;
+volatile uint8_t sosConfirmedNumber = 0;
 volatile bool sosPending = false;
-volatile bool sosConfirmed = false;
-volatile bool sosLate = false;
-bool sosLateSignaled = false;
-char sosId[12] = "";
+char sosId[16] = "";
 uint32_t sosCreatedMs = 0;
 uint32_t sosLastSendMs = 0;
 uint16_t sosAttempts = 0;
@@ -69,7 +70,7 @@ void onMqttMessage(char *topicName, uint8_t *payload, unsigned int length) {
   text[n] = '\0';
   if (strstr(text, sosId) != nullptr) {
     sosPending = false;
-    sosConfirmed = true;
+    sosConfirmedNumber = sosCurrentNumber;
     Serial.printf("[iot] SOS %s confirmé par le VPS : %s\n", sosId, text);
   }
 }
@@ -96,26 +97,19 @@ void maintainMqtt() {
 }
 
 void handleSos() {
-  if (sosRequested) {
-    sosRequested = false;
-    if (!sosPending) {
-      snprintf(sosId, sizeof(sosId), "%08lx", (unsigned long)esp_random());
-      sosCreatedMs = millis();
-      sosLastSendMs = 0;
-      sosAttempts = 0;
-      sosConfirmed = false;
-      sosLate = false;
-      sosLateSignaled = false;
-      sosPending = true;
-      Serial.printf("[iot] SOS %s créé\n", sosId);
-    }
+  // Nouveau SOS demandé par la canne (numéro différent de celui en cours ou déjà confirmé).
+  const uint8_t demande = sosRequestedNumber;
+  if (demande != 0 && demande != sosCurrentNumber) {
+    sosCurrentNumber = demande;
+    snprintf(sosId, sizeof(sosId), "%08lx-%u", (unsigned long)esp_random(), demande);
+    sosCreatedMs = millis();
+    sosLastSendMs = 0;
+    sosAttempts = 0;
+    sosPending = true;
+    Serial.printf("[iot] SOS %s créé (demande n°%u de la canne)\n", sosId, demande);
   }
   if (!sosPending) return;
   const uint32_t age = millis() - sosCreatedMs;
-  if (!sosLateSignaled && age > SOS_LATE_MS) {
-    sosLateSignaled = true;
-    sosLate = true;
-  }
   if (age > SOS_EXPIRY_MS) {
     sosPending = false;
     Serial.printf("[iot] SOS %s abandonné : aucune confirmation en 30 min\n", sosId);
@@ -125,14 +119,10 @@ void handleSos() {
   if (sosLastSendMs != 0 && millis() - sosLastSendMs < SOS_RETRY_MS) return;
   sosLastSendMs = millis();
   sosAttempts++;
-  bool lunettes;
-  portENTER_CRITICAL(&lock);
-  lunettes = glassesOk;
-  portEXIT_CRITICAL(&lock);
   char payload[220];
   snprintf(payload, sizeof(payload),
-           "{\"v\":1,\"event\":\"SOS\",\"event_id\":\"%s\",\"device\":\"%s\",\"age_s\":%lu,\"attempt\":%u,\"glasses\":%s}",
-           sosId, DEVICE_ID, (unsigned long)(age / 1000), sosAttempts, lunettes ? "true" : "false");
+           "{\"v\":1,\"event\":\"SOS\",\"event_id\":\"%s\",\"device\":\"%s\",\"age_s\":%lu,\"attempt\":%u,\"glasses\":true}",
+           sosId, DEVICE_ID, (unsigned long)(age / 1000), sosAttempts);
   mqtt.publish(topic("sos").c_str(), payload, false);
   Serial.printf("[iot] SOS %s publié (essai %u)\n", sosId, sosAttempts);
 }
@@ -157,25 +147,28 @@ void appendNumber(char *out, size_t size, const char *key, long value) {
 void publishTelemetry() {
   if (!mqtt.connected()) return;
   long d[4];
-  bool lunettes;
+  bool canne, casque;
   portENTER_CRITICAL(&lock);
   memcpy(d, distances, sizeof(d));
-  lunettes = glassesOk;
+  canne = canneOk;
+  casque = casqueOk;
   portEXIT_CRITICAL(&lock);
 
   // null = rien détecté dans la portée du capteur (le dashboard affiche « Libre »).
-  char payload[320];
+  // Sans nouvelles de la canne, ses trois capteurs sont publiés à null.
+  char payload[340];
   snprintf(payload, sizeof(payload), "{\"v\":1,\"device\":\"%s\"", DEVICE_ID);
-  appendNumber(payload, sizeof(payload), "left_cm", d[0]);
-  appendNumber(payload, sizeof(payload), "center_cm", d[1]);
-  appendNumber(payload, sizeof(payload), "right_cm", d[2]);
-  appendNumber(payload, sizeof(payload), "head_cm", lunettes ? d[3] : -1);
+  appendNumber(payload, sizeof(payload), "left_cm", canne ? d[0] : -1);
+  appendNumber(payload, sizeof(payload), "center_cm", canne ? d[1] : -1);
+  appendNumber(payload, sizeof(payload), "right_cm", canne ? d[2] : -1);
+  appendNumber(payload, sizeof(payload), "head_cm", d[3]);
   appendNumber(payload, sizeof(payload), "battery_pct", batteryPercent());
   const size_t used = strlen(payload);
+  // espnow : liaison canne <-> lunettes active ; headset : casque Bluetooth de la canne.
   snprintf(payload + used, sizeof(payload) - used,
-           ",\"espnow\":%s,\"rssi\":%d,\"sos_pending\":%s,\"uptime_s\":%lu}",
-           lunettes ? "true" : "false", (int)WiFi.RSSI(), sosPending ? "true" : "false",
-           (unsigned long)(millis() / 1000));
+           ",\"espnow\":%s,\"headset\":%s,\"rssi\":%d,\"sos_pending\":%s,\"uptime_s\":%lu}",
+           canne ? "true" : "false", casque ? "true" : "false", (int)WiFi.RSSI(),
+           sosPending ? "true" : "false", (unsigned long)(millis() / 1000));
   mqtt.publish(topic("telemetry").c_str(), payload, false);
 }
 
@@ -227,13 +220,15 @@ bool iotIsConnected() {
   return mqtt.connected();
 }
 
-void iotSetState(long gaucheCm, long centreCm, long droiteCm, long teteCm, bool lunettesOk) {
+void iotSetState(long gaucheCm, long centreCm, long droiteCm, long teteCm, bool canneConnectee,
+                 bool casqueConnecte) {
   portENTER_CRITICAL(&lock);
   distances[0] = gaucheCm;
   distances[1] = centreCm;
   distances[2] = droiteCm;
   distances[3] = teteCm;
-  glassesOk = lunettesOk;
+  canneOk = canneConnectee;
+  casqueOk = casqueConnecte;
   portEXIT_CRITICAL(&lock);
 }
 
@@ -250,22 +245,10 @@ void iotReportMessage(int mp3, const char *text) {
   xQueueSend(messageQueue, &event, 0);
 }
 
-void iotRequestSos() {
-  sosRequested = true;
+void iotRequestSos(uint8_t numero) {
+  if (numero != 0) sosRequestedNumber = numero;
 }
 
-bool iotSosPending() {
-  return sosPending || sosRequested;
-}
-
-bool iotTakeSosConfirmed() {
-  if (!sosConfirmed) return false;
-  sosConfirmed = false;
-  return true;
-}
-
-bool iotTakeSosLate() {
-  if (!sosLate) return false;
-  sosLate = false;
-  return true;
+uint8_t iotConfirmedSos() {
+  return sosConfirmedNumber;
 }

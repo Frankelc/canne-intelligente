@@ -1,162 +1,157 @@
-# Kit IoT — ESP32, MQTT, VPS et Telegram
+# Kit IoT : canne, lunettes, VPS et Telegram
 
-Ce kit est le point de départ de la partie IoT du projet IFRI SEIoT. Il met en place le chemin **ESP32 de la canne → MQTT/TLS → VPS → Telegram**. L'ESP32 des lunettes échange ses mesures avec la canne en ESP-NOW ; le guidage audio reste local.
+Partie IoT du projet 3 (IFRI, certification SEIoT) : canne et lunettes intelligentes pour personnes non voyantes.
+
+Chemin des données dans l'architecture finale, validée sur le matériel (SOS Telegram compris) :
+
+```text
+Casque Bluetooth ◄── Canne (ESP32) ◄──ESP-NOW──► Lunettes (ESP32, passerelle) ──MQTT/TLS 8883──► VPS ──► Telegram
+   voix A2DP        3 ultrasons, décision,        capteur tête + Wi-Fi                          Mosquitto, relais Telegram,
+                    voix, bouton SOS              publie tout sur le VPS                         tableau de bord HTTPS 8443
+```
+
+- **La canne n'a pas d'Internet.** Son ESP32 n'a pas assez de mémoire pour le Bluetooth audio et une connexion TLS en même temps (13 Ko libres avant la répartition, 73 Ko après). Elle mesure, décide et parle dans le casque Bluetooth, même sans réseau.
+- **Les lunettes servent de passerelle.** Elles reçoivent de la canne les distances, les annonces et les SOS (ESP-NOW), les publient sur le VPS, et renvoient à la canne l'état du VPS et la confirmation des SOS.
+- **Le VPS** reçoit tout en MQTT/TLS, prévient le proche sur Telegram et affiche le tableau de bord.
+
+Les raisons de ces choix sont détaillées dans [CHOIX_IOT.md](CHOIX_IOT.md).
 
 ## Contenu
 
-- `docker-compose.yml` : broker Mosquitto, relais Telegram, tableau de bord web et Caddy (HTTPS).
-- `deploy/` : script d'installation sur le VPS, renouvellement du certificat, test SOS, génération des paramètres ESP32.
-- `caddy/Caddyfile` : HTTPS et mot de passe devant le dashboard.
-- `mosquitto/` : configuration TLS, contrôle d'accès MQTT.
-- `telegram-bridge/` : service Python abonné au SOS et appelant Telegram.
-- `dashboard/` : tableau de bord web en lecture seule (télémétrie, liaisons, événements/SOS).
-- `firmware/canne/` : sketch Arduino de départ pour Wi-Fi, TLS/MQTT, ESP-NOW RX et bouton SOS.
-- `.env.example` : paramètres serveur à copier dans `.env`.
+| Dossier | Rôle |
+|---|---|
+| `firmware/canne/` | Canne : 3 HC-SR04, décision, voix Bluetooth (clips en mémoire flash), bouton SOS, ESP-NOW |
+| `firmware/lunettes/` | Lunettes : HC-SR04 tête, ESP-NOW, passerelle Wi-Fi + MQTT/TLS (`iot.cpp`) |
+| `dashboard/` | Tableau de bord Flask (`dashboard.py`) et sa page (`index.html`) |
+| `telegram-bridge/` | Relais SOS vers Telegram (`bridge.py`), avec accusé de réception |
+| `vps-user/` | **Installation actuelle** sur le VPS partagé, sans `sudo` ni Docker |
+| `mosquitto/` | Configuration du courtier MQTT |
+| `deploy/`, `docker-compose.yml`, `caddy/` | Variante Docker pour un VPS dont on est administrateur (non utilisée) |
+| `Code/` | Premiers programmes de l'équipe, gardés pour mémoire (obsolètes) |
 
-Pour comprendre les raisons des choix, les alternatives et les lacunes restantes, lire [CHOIX_IOT.md](CHOIX_IOT.md).
+## Installation actuelle : VPS partagé (`vps-user/`)
 
-## Prérequis
+Le VPS du projet (185.215.164.23) est partagé : les ports 80 et 443 appartiennent à un autre service, et le compte `groupe3` n'a ni `sudo` ni Docker. `vps-user/install.sh` installe donc tout dans `~/iot-canne`, sans rien modifier d'autre sur la machine :
 
-- Un VPS Ubuntu 22.04/24.04 (ou Debian 12) avec accès SSH et `sudo`.
-- Un nom de domaine qui pointe vers l'IP du VPS (enregistrement A). Sans domaine : créer un sous-domaine gratuit sur [duckdns.org](https://www.duckdns.org) et y mettre l'IP du VPS.
-- Un bot Telegram et le chat ID du destinataire (voir plus bas).
-
-Les firmwares de `firmware/` sont les programmes de l'équipe, reliés au VPS.
-
-## Installation sur le VPS (une commande)
-
-Depuis le PC, copier le dossier puis se connecter :
-
-```sh
-scp -r iot-kit utilisateur@IP_DU_VPS:~/
-ssh utilisateur@IP_DU_VPS
-cd ~/iot-kit
-sudo bash deploy/deploy.sh      # 1er lancement : crée .env et s'arrête
-nano .env                       # renseigner DOMAIN, ACME_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-sudo bash deploy/deploy.sh      # installation complète
-```
-
-Le script `deploy/deploy.sh` :
-
-1. installe Docker, certbot et ufw ;
-2. vérifie que le domaine pointe bien vers le VPS ;
-3. génère les mots de passe MQTT et dashboard laissés à `CHANGE_ME` dans `.env` ;
-4. crée les comptes MQTT `canne01` (publication) et `dashboard` (lecture seule) ;
-5. ouvre les ports SSH, 80 (renouvellement du certificat), 443 (dashboard) et 8883 (MQTT TLS) ;
-6. obtient un certificat Let's Encrypt, renouvelé automatiquement par certbot (`deploy/renew-hook.sh` le recopie et redémarre Mosquitto et Caddy) ;
-7. lance Mosquitto, le relais Telegram, le dashboard et Caddy, puis teste le port 8883 ;
-8. écrit `deploy/config-mqtt.h` : domaine, identifiants et certificat racine à recopier dans `firmware/canne/config.h`.
-
-Il est relançable : les mots de passe et le certificat déjà créés sont conservés. Si l'hébergeur a son propre pare-feu (panneau web), y ouvrir aussi 80, 443 et 8883.
-
-Si le copier-coller depuis Windows a ajouté des fins de ligne CRLF (`$'
-': command not found`), lancer `sed -i 's/
-$//' deploy/*.sh` puis relancer.
-
-**Tester sans ESP32 :** `sudo bash deploy/test-sos.sh` publie un SOS avec le compte de la canne. La notification doit arriver sur Telegram et l'événement doit s'afficher sur le dashboard. Attendre `SOS_COOLDOWN_SECONDS` (30 s) entre deux tests.
-
-`deploy.sh` génère `mosquitto/acl` à partir de `.env`, avec trois comptes aux droits minimaux : `canne01` publie ses mesures et le SOS et lit l'accusé ; `telegram` lit le SOS et publie l'accusé ; `dashboard` lit tout et ne publie rien. Chaque conteneur ne reçoit que ses propres secrets.
-
-## VPS partagé sans droits administrateur (`vps-user/`) — installation actuelle
-
-Le VPS du projet (185.215.164.23) est partagé : les ports 80/443 appartiennent à un autre service, et le compte `groupe3` n'a ni `sudo` ni Docker. Le dossier `vps-user/` installe donc tout dans `~/iot-canne`, sans rien modifier d'autre sur la machine :
-
-- Mosquitto est extrait des paquets Ubuntu (sans installation système), Python tourne dans `~/iot-canne/venv` ;
-- MQTT/TLS sur le port **8883**, dashboard HTTPS + mot de passe sur le port **8443** ;
-- certificats signés par une autorité propre au projet (`certs/ca.crt`), connue de l'ESP32 ; le navigateur affiche un avertissement la première fois ;
-- redémarrage automatique : deux lignes `# iot-canne` dans la crontab de `groupe3`.
+- Mosquitto est extrait des paquets Ubuntu (sans installation système) ; Python tourne dans `~/iot-canne/venv` ;
+- MQTT/TLS sur le port **8883**, tableau de bord HTTPS avec mot de passe sur le port **8443** ;
+- certificats signés par une autorité propre au projet (`certs/ca.crt`), connue de l'ESP32 des lunettes ; le navigateur affiche un avertissement la première fois ;
+- redémarrage automatique : deux lignes `# iot-canne` dans la crontab de `groupe3` ;
+- à la fin, `~/iot-canne/config-mqtt.h` contient le bloc MQTT à recopier dans `firmware/lunettes/config.h`.
 
 Commandes sur le VPS :
 
 ```sh
 bash ~/iot-canne/run.sh status          # état des 3 services
 bash ~/iot-canne/run.sh restart
-bash ~/iot-canne/test-sos.sh            # SOS de test → Telegram
+bash ~/iot-canne/test-sos.sh            # SOS de test vers Telegram, sans ESP32
 tail -f ~/iot-canne/logs/telegram.log   # journaux : mosquitto, telegram, dashboard
 grep DASHBOARD_PASSWORD ~/iot-canne/.env
 ```
 
-Mise à jour depuis le PC : copier les fichiers modifiés (`vps-user/*`, et `bridge.py`, `dashboard.py`, `index.html` dans `~/iot-canne/app/`), puis `bash ~/iot-canne/install.sh`.
+### Mettre à jour le tableau de bord ou le relais
 
-## Création du bot Telegram
+Depuis le PC (PowerShell), dans le dossier `iot-kit` :
 
-1. Dans Telegram, créer un bot avec `@BotFather` et copier son token dans `.env`.
-2. Ouvrir une conversation avec ce bot et envoyer `/start`.
-3. Renseigner l'identifiant de chat autorisé dans `TELEGRAM_CHAT_ID`.
-4. Redémarrer le bridge : `docker compose up -d --build telegram-bridge`.
-5. Ne jamais mettre le token dans le firmware, le README, Git ou une capture d'écran.
+```sh
+scp telegram-bridge/bridge.py dashboard/dashboard.py dashboard/index.html groupe3@185.215.164.23:~/iot-canne/app/
+ssh groupe3@185.215.164.23 "bash ~/iot-canne/run.sh restart"
+```
+
+Si `vps-user/*` a changé, copier aussi ces fichiers dans `~/iot-canne/` puis lancer `bash ~/iot-canne/install.sh` (relançable : mots de passe et certificats existants conservés).
 
 ## Firmwares ESP32
 
-Les programmes de l'équipe (`Code/canne_finale.ino`, `Code/lunettes.ino`) sont conservés tels quels comme référence. Les versions à flasher sont dans `firmware/`.
+Arduino IDE, cœur **Arduino-ESP32 3.x**, carte **ESP32 Dev Module**, moniteur série à 115200 bauds. Les fichiers `config.h` contiennent des secrets : ils ne sont jamais publiés (voir `.gitignore`). On les crée en copiant `config.example.h`.
 
-Arduino IDE, cœur **Arduino-ESP32 3.x**, carte **ESP32 Dev Module** pour les deux. Bibliothèques : **DFRobotDFPlayerMini** et **PubSubClient** (canne).
+### Canne : `firmware/canne/`
 
-### Canne — `firmware/canne/`
+- Bibliothèque **ESP32-A2DP** (pschatzmann, depuis GitHub).
+- **Outils → Partition Scheme → « Huge APP (3MB No OTA/1MB SPIFFS) »** : le Bluetooth et les messages vocaux dépassent la taille par défaut.
+- `config.h` : `WIFI_SSID` (le même nom que dans les lunettes ; la canne ne s'y connecte pas, elle s'en sert pour se caler sur le même canal radio) et `BT_HEADSET_NAME` (nom **exact** du casque, majuscules ignorées : la canne ne se connecte à aucun autre appareil ; laisser vide pour lister les appareils trouvés dans le moniteur série). Casque du projet : « Amis Hi580MAX ».
+- Câblage : gauche Trig 13 / Echo 34, centre Trig 14 / Echo 35, droite Trig 27 / Echo 32 (Echo par pont diviseur), bouton SOS entre GPIO 25 et GND.
 
-`canne.ino` est le programme de l'équipe (capteurs, décision, voix, réception des lunettes), avec ces seuls changements :
+### Lunettes : `firmware/lunettes/`
 
-- le SOS ne contacte plus Telegram directement : le jeton du bot n'est plus dans la canne, et le guidage ne se fige plus pendant l'envoi ;
-- l'envoi est fait par `iot.cpp` (cœur 0) vers le VPS, répété jusqu'à confirmation ; « Alerte envoyée » (0008) est jouée à la confirmation, « Alerte non envoyée » (0010) immédiatement sans Wi-Fi ou après 20 s sans confirmation, et l'envoi continue en arrière-plan ;
-- distances, état des lunettes et messages joués partent vers le tableau de bord ;
-- la veille radio est coupée une fois connecté (`WiFi.setSleep(false)`), sinon des paquets des lunettes se perdent ;
-- Wi-Fi et VPS sont réglés dans `config.h` au lieu du haut du programme.
+- Bibliothèque **PubSubClient**.
+- `config.h` : `WIFI_SSID` / `WIFI_PASSWORD` (partage de connexion du téléphone), puis le bloc MQTT généré par `install.sh` sur le VPS (`config-mqtt.h`). `BATTERY_ADC_PIN` reste à `-1` tant que le pont diviseur de la batterie n'est pas câblé.
+- Câblage : Trig 13, Echo 34 par pont diviseur (1 kΩ / 2 kΩ), 3 piles AA sur VIN.
+- Moniteur série attendu : `[iot] MQTT connecté au VPS (TLS)`.
 
-1. Copier `config.example.h` en `config.h`. Renseigner `WIFI_SSID` / `WIFI_PASSWORD` (partage de connexion du téléphone).
-2. Remplacer le bloc MQTT par le contenu de `deploy/config-mqtt.h` généré sur le VPS (domaine, identifiants, certificat racine).
-3. Flasher et ouvrir le moniteur série (115200 bauds) : `Wi-Fi connecte, canal N`, puis `[iot] MQTT connecté au VPS (TLS)`.
+`protocole.h` décrit les paquets ESP-NOW. **Il doit être identique dans les deux dossiers.**
 
-### Lunettes — `firmware/lunettes/`
+**Règle radio.** Les lunettes se connectent au partage de connexion ; la canne cherche le même réseau et se place sur son canal (canal 1 s'il est absent). Il faut donc **activer le partage de connexion avant d'allumer les deux cartes**, et ne pas le couper pendant la démo. Si le partage redémarre sur un autre canal, redémarrer les deux cartes.
 
-Programme de l'équipe, inchangé : HC-SR04 à hauteur de tête, envoi ESP-NOW en diffusion toutes les 100 ms, paquet filtré par le code `CANE`. Renseigner `WIFI_SSID` avec **le même nom** que dans la canne.
+### Guidage vocal (canne)
 
-**Règle radio commune** : canne et lunettes cherchent le réseau `WIFI_SSID` au démarrage et se placent sur son canal (canal 1 s'il est absent). En pratique : **activer le partage de connexion avant d'allumer la canne et les lunettes**, et ne pas le couper pendant la démo. Si le partage redémarre sur un autre canal, redémarrer les deux cartes.
+| Situation | Seuil | Annonce |
+|---|---|---|
+| Obstacle à hauteur de tête (lunettes) | < 100 cm | « Attention, obstacle en hauteur », prioritaire |
+| Obstacle devant | < 120 cm | « Obstacle devant, allez à gauche/droite » ou « Stop, obstacle », répété toutes les 4 s |
+| Obstacle sur le côté | < 60 cm | « Obstacle à gauche/droite », dit une fois |
+| Fin d'un obstacle devant | | « Continuez tout droit », une fois |
+
+Un obstacle n'est considéré comme parti qu'au-dessus de son seuil + 20 cm : cette marge évite les annonces qui « clignotent » quand la distance hésite autour du seuil.
 
 ## Sujets MQTT
 
-Préfixe par défaut : `ifri/seiot/projet3/canne01`.
+Préfixe : `ifri/seiot/projet3/canne01`. Toutes les cartes publient **via les lunettes**.
 
-| Sujet | Émetteur | Usage | QoS |
+| Sujet | Émetteur | Contenu | QoS |
 |---|---|---|---:|
-| `.../telemetry` | canne | Mesures toutes les secondes | 0 |
-| `.../event` | canne | Message vocal joué | 0 |
-| `.../sos` | canne | SOS, répété toutes les 5 s jusqu'à l'accusé | 0 |
+| `.../telemetry` | lunettes | Mesures, chaque seconde | 0 |
+| `.../event` | lunettes | Message vocal joué par la canne | 0 |
+| `.../sos` | lunettes | SOS, répété toutes les 5 s jusqu'à l'accusé | 0 |
 | `.../sos/ack` | relais | Accusé : `envoye` ou `deja_signale` | 1 |
-| `.../availability` | canne | `online` / `offline` (retenu, Last Will) | 1 |
+| `.../availability` | lunettes | `online` / `offline` de la **passerelle** (retenu, Last Will) | 1 |
 
-Télémétrie : `{"v":1,"device":"canne01","left_cm":85,"center_cm":null,"right_cm":140,"head_cm":null,"battery_pct":null,"espnow":true,"rssi":-61,"sos_pending":false,"uptime_s":42}`. Pour une distance, `null` signifie « rien détecté dans la portée » (affiché « Libre »). `battery_pct` reste `null` tant que le pont diviseur n'est pas câblé.
+Télémétrie :
 
-SOS : `{"v":1,"event":"SOS","event_id":"a1b2c3d4","device":"canne01","age_s":0,"attempt":1,"glasses":true}`.
+```json
+{"v":1,"device":"canne01","left_cm":85,"center_cm":null,"right_cm":140,"head_cm":null,
+ "battery_pct":null,"espnow":true,"headset":true,"rssi":-61,"sos_pending":false,"uptime_s":42}
+```
 
-**Fiabilité du SOS.** PubSubClient ne publie qu'en QoS 0. La fiabilité vient donc d'un accusé applicatif : la canne réémet le même `event_id` toutes les 5 s, y compris après une coupure réseau, pendant au plus 30 min. Le relais envoie Telegram une seule fois par `event_id` et garde la liste des SOS traités sur disque (volume `telegram_data`), même après un redémarrage. Il ne publie l'accusé qu'après l'acceptation du message par Telegram ; c'est alors seulement que la canne joue « Alerte envoyée ». Si l'alerte part en retard, le message Telegram l'indique.
+- distances : `null` signifie « rien détecté dans la portée » ; gauche, centre et droite sont aussi à `null` quand la canne n'est pas joignable ;
+- `espnow` : la canne est joignable par les lunettes ; `headset` : le casque Bluetooth de la canne est connecté ;
+- `rssi`, `uptime_s` et `battery_pct` sont ceux **des lunettes**.
+
+Annonce : `{"v":1,"type":"annonce","mp3":6,"message":"Attention, obstacle en hauteur"}` (`mp3` est le numéro du message, de 1 à 10).
+
+SOS : `{"v":1,"event":"SOS","event_id":"a3f09c1e-7","device":"canne01","age_s":0,"attempt":1,"glasses":true}`. L'identifiant est formé de 8 caractères hexadécimaux, d'un tiret et du numéro de SOS choisi par la canne.
+
+**Fiabilité du SOS.** Appui long (1,5 s) sur le bouton : la canne envoie un numéro de SOS aux lunettes, qui le publient toutes les 5 s (30 min au plus) jusqu'à l'accusé. PubSubClient ne publie qu'en QoS 0 : la fiabilité vient de cet accusé applicatif. Le relais n'envoie Telegram qu'une fois par `event_id` (liste gardée sur disque, même après un redémarrage) et ne publie l'accusé qu'une fois le message accepté par Telegram. Les lunettes transmettent alors la confirmation à la canne, qui dit « Alerte envoyée ». Sans confirmation au bout de 20 s, elle dit « Alerte non envoyée » et l'envoi continue en arrière-plan.
 
 ## Tableau de bord
 
-`https://DOMAIN`, protégé par `DASHBOARD_USER` / `DASHBOARD_PASSWORD` (affichés à la fin de `deploy.sh`). Page : `dashboard/index.html`.
+`https://185.215.164.23:8443`, protégé par mot de passe (`DASHBOARD_USER` / `DASHBOARD_PASSWORD` dans `~/iot-canne/.env`). Il ne fait que refléter l'état : le guidage se fait dans la canne, sans Internet.
 
-- **Radar de la canne** : vue de dessus des 3 ultrasons (−30°, 0°, +30°), colorés par zone (danger < 50 cm, attention 50–120 cm, libre).
-- **Deux zones couvertes** : vue de profil, zone basse (canne) et zone haute (lunettes).
-- **Ce qu'entend la personne** : dernier message vocal en grand. Le bouton « Faire parler le projecteur » le lit aussi à voix haute (synthèse vocale du navigateur, à activer d'un clic avant la démo).
+- **Chaîne de liaison** : casque Bluetooth, canne (`espnow`), passerelle (`availability`), VPS et Telegram, chacun avec son état ; en dessous, batterie et Wi-Fi des lunettes, temps de marche de la passerelle, SOS en cours.
+- **Radar de la canne** : vue de dessus des 3 ultrasons avec les vrais seuils (côtés 60 cm, devant 120 cm) et la marge de 20 cm. Chaque état a une couleur, une forme et un mot (« Annoncé », « Marge », « Hors seuil », « Libre »).
+- **Deux hauteurs couvertes** : vue de profil, tête (lunettes, seuil 100 cm) et sol devant (canne, seuil 120 cm).
+- **Ce qu'entend la personne** : dernier message joué dans le casque. Le bouton « Voix » le lit aussi à voix haute sur l'ordinateur (à activer d'un clic avant la démo).
 - **SOS** : alerte plein écran, suivie jusqu'à « Telegram envoyé ».
-- **Mode simulation** : `https://DOMAIN/?demo=1` joue un scénario fictif pour répéter au projecteur sans la canne. Un bandeau jaune et noir indique « SIMULATION » : ne pas l'utiliser pendant la vraie démo.
+- **Mode projecteur** : bouton « Projecteur » (ou `?theme=clair`) pour un fond clair et un texte agrandi, plus lisibles au vidéoprojecteur. Le choix est mémorisé.
+- **Mode simulation** : `?demo=1` rejoue en boucle un parcours d'une minute au format réel (obstacles, casque déconnecté, passerelle hors ligne, SOS). `&t=25` démarre à la 25e seconde. Un bandeau bleu signale la simulation : ne pas l'utiliser pendant la vraie démo.
 
-Le port 8080 n'est pas ouvert sur Internet ; en dépannage : `ssh -L 8080:127.0.0.1:8080 utilisateur@IP_DU_VPS`, puis `http://127.0.0.1:8080`.
+Le contrat de `/api/state` est stable : `telemetry`, `telemetry_at`, `availability`, `events`, `stats`, `now`.
 
 ## Dépannage rapide
 
-- **`deploy.sh` échoue au certificat** : le domaine ne pointe pas encore vers le VPS (attendre la propagation DNS) ou le port 80 est fermé chez l'hébergeur.
-- **VPS joignable mais MQTT refuse la connexion** : vérifier DNS, port 8883, pare-feu, certificat, date/heure, login et ACL.
-- **TLS échoue dans PubSubClient** : charger la CA correcte dans `setCACert`; ne pas contourner la validation en production.
-- **MQTT fonctionne mais ESP-NOW est perdu** : vérifier que les deux cartes sont sur le même canal après connexion Wi-Fi, les adresses MAC et le format/taille du paquet.
-- **Pas de Telegram** : vérifier que le bot a reçu `/start`, le token/chat_id, les logs bridge et la connectivité HTTPS sortante du VPS.
-- **Wi-Fi absent** : la voix et la détection locales doivent continuer ; seul le tableau de bord et l'alerte distante sont indisponibles.
+- **Passerelle hors ligne** au tableau de bord : vérifier le partage de connexion et le moniteur série des lunettes (`MQTT échec`, état TLS, mémoire libre).
+- **Canne injoignable** alors que la passerelle est en ligne : canne éteinte, hors de portée, ou sur un autre canal radio (redémarrer les deux cartes après avoir activé le partage).
+- **Casque déconnecté** : vérifier `BT_HEADSET_NAME` et que le casque n'est pas connecté à un autre appareil.
+- **Pas de Telegram** : vérifier que le bot a reçu `/start`, le jeton et le chat ID dans `.env`, puis `logs/telegram.log`.
+- **Sans Internet** : la détection et la voix continuent ; seuls le tableau de bord et l'alerte à distance sont indisponibles.
 
-## Ordre de validation conseillé
+## Variante Docker (VPS administré)
 
-1. Depuis un PC, publier manuellement un SOS au broker TLS et vérifier Telegram.
-2. Connecter l'ESP32 de la canne au Wi-Fi puis au broker, publier un message de test.
-3. Faire fonctionner ESP-NOW lunettes→canne pendant que MQTT est connecté (le dashboard doit afficher les lunettes comme connectées).
-4. Brancher le bouton SOS et valider une notification unique.
-5. Brancher les vraies mesures et le dashboard ; couper Internet et vérifier que le guidage local reste actif.
+Pour un VPS dont on est administrateur, `deploy/deploy.sh` installe la même chaîne avec Docker, un certificat Let's Encrypt (domaine requis) et Caddy devant le tableau de bord. Elle n'est pas utilisée sur le VPS actuel. Le bloc MQTT généré (`deploy/config-mqtt.h`) se recopie aussi dans `firmware/lunettes/config.h`.
 
-Voir le README parent pour les objectifs, le planning sur cinq jours, le matériel, les précautions électriques et les critères de démonstration.
+## Création du bot Telegram
+
+1. Dans Telegram, créer un bot avec `@BotFather` et copier son jeton dans `.env` sur le VPS.
+2. Ouvrir une conversation avec ce bot et envoyer `/start`.
+3. Renseigner l'identifiant de chat dans `TELEGRAM_CHAT_ID` (plusieurs possibles, séparés par des virgules).
+4. Redémarrer : `bash ~/iot-canne/run.sh restart`.
+5. Ne jamais mettre le jeton dans un firmware, un document, Git ou une capture d'écran.

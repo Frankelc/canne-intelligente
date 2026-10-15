@@ -121,10 +121,10 @@ topic read $PREFIX/#
 EOF
 chmod 600 mosquitto/passwd mosquitto/acl
 
-# 6. Paramètres à recopier dans firmware/canne/config.h
+# 6. Paramètres à recopier dans firmware/lunettes/config.h
 step "Paramètres ESP32"
 {
-  echo "// Généré par install.sh sur le VPS — à recopier dans firmware/canne/config.h"
+  echo "// Généré par install.sh sur le VPS — à recopier dans firmware/lunettes/config.h"
   echo "#define MQTT_HOST \"$MQTT_HOST\""
   echo "#define MQTT_PORT 8883"
   echo "#define MQTT_USER \"$CANNE_USER\""

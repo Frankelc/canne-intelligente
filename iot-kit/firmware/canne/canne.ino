@@ -5,8 +5,11 @@
 //  - réception de la distance "tête" envoyée par les lunettes (ESP-NOW)
 //  - décision : quel message dire 
 //  - messages vocaux envoyés en Bluetooth à un casque audio (audio.cpp)
-//  - bouton SOS (appui long) : alerte envoyée au VPS (MQTT/TLS), qui prévient Telegram
-//  - mesures et annonces envoyées au tableau de bord du VPS (iot.cpp, cœur 0)
+//  - bouton SOS (appui long) : demande transmise aux lunettes (ESP-NOW), qui la publient
+//    sur le VPS (MQTT/TLS) ; le VPS prévient Telegram et confirme
+//  - mesures et annonces transmises aux lunettes pour le tableau de bord du VPS
+//  La canne ne se connecte PAS à Internet : le Bluetooth audio occupe trop de mémoire pour
+//  la connexion TLS. Ce sont les lunettes qui servent de passerelle (voir protocole.h).
 //
 //  Câblage (voir Documentation_Projet3.md) :
 //    Gauche : Trig GPIO 13, Echo -> pont diviseur -> GPIO 34
@@ -18,15 +21,15 @@
 //  Carte : "ESP32 Dev Module"   Moniteur série : 115200 bauds
 //  IMPORTANT : Outils -> Partition Scheme -> "Huge APP (3MB No OTA/1MB SPIFFS)"
 //              (Bluetooth + messages vocaux : le programme dépasse la taille par défaut)
-//  Bibliothèques : PubSubClient, ESP32-A2DP (pschatzmann, depuis GitHub)
-//  Configuration : copier config.example.h en config.h (Wi-Fi + bloc MQTT du VPS)
+//  Bibliothèque : ESP32-A2DP (pschatzmann, depuis GitHub)
+//  Configuration : config.h (WIFI_SSID pour trouver le canal radio, nom du casque)
 // ============================================================
 
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-#include "config.h"   // Wi-Fi et VPS (le jeton Telegram reste sur le VPS, jamais dans la canne)
-#include "iot.h"
+#include "config.h"
+#include "protocole.h"
 #include "audio.h"
 
 // ------------------------------------------------------------
@@ -43,15 +46,21 @@ const int BOUTON_SOS = 25;
 // ------------------------------------------------------------
 //  Réglages
 // ------------------------------------------------------------
-const long SEUIL_OBSTACLE = 120;      // cm : en dessous, un capteur de la canne est "bloqué"
+const long SEUIL_CENTRE   = 120;      // cm : obstacle devant (là où la personne avance)
+const long SEUIL_COTE     = 60;       // cm : obstacle sur le côté (seulement s'il est proche)
 const long SEUIL_TETE     = 100;      // cm : obstacle à hauteur de tête
+const long HYSTERESIS     = 20;       // cm : un obstacle détecté ne « disparaît » qu'au-delà
+                                      // de seuil + 20 cm (évite qu'il clignote près du seuil)
 const long TIMEOUT_US     = 25000;    // attente max de l'écho (environ 4 m)
 const int  PAUSE_CAPTEUR_MS = 35;     // pause après chaque mesure (évite les échos croisés)
 
-const unsigned long MIN_ENTRE_MESSAGES = 1500;  // ms entre deux messages différents
-const unsigned long REPETITION_MS      = 3000;  // ms avant de répéter le même message
+const unsigned long MIN_ENTRE_MESSAGES = 1500;  // ms entre deux messages
+const unsigned long REPETITION_MS      = 4000;  // ms avant de répéter un obstacle DEVANT
+                                                // (un obstacle sur le côté n'est dit qu'une fois)
 const unsigned long LUNETTES_TIMEOUT   = 1500;  // ms sans nouvelles : lunettes absentes
 const unsigned long DUREE_APPUI_SOS    = 1500;  // ms d'appui pour déclencher le SOS
+const unsigned long SOS_DELAI_MS       = 20000; // sans confirmation : « Alerte non envoyée »
+const unsigned long INTERVALLE_ETAT_MS = 300;   // envoi de l'état aux lunettes
 
 // ------------------------------------------------------------
 //  Messages : numéro du message vocal dans audio_clips.h
@@ -68,25 +77,23 @@ const int MSG_ALERTE_OK     = 8;   // « Alerte envoyée »
 const int MSG_PRET          = 9;   // « Système prêt » (dit quand le casque se connecte)
 const int MSG_ALERTE_ECHEC  = 10;  // « Alerte non envoyée »
 
-// Texte de chaque message, pour le journal du tableau de bord.
-const char* TEXTE_MSG[] = {
-  "", "Obstacle à gauche", "Obstacle à droite", "Obstacle devant, allez à gauche",
-  "Obstacle devant, allez à droite", "Stop, obstacle", "Attention, obstacle en hauteur",
-  "Continuez tout droit", "Alerte envoyée", "Système prêt", "Alerte non envoyée"
-};
-
 // ------------------------------------------------------------
-//  Paquet reçu des lunettes (identique dans lunettes.ino)
+//  Données reçues des lunettes (paquets décrits dans protocole.h)
 // ------------------------------------------------------------
-const uint32_t CODE_PROJET = 0x43414E45;   // "CANE" : ignore les autres appareils ESP-NOW
-typedef struct __attribute__((packed)) {
-  uint32_t code;
-  int16_t  distanceCm;   // -1 = rien détecté
-  uint16_t numero;
-} PaquetLunettes;
-
 volatile int16_t teteDistance = -1;
 volatile unsigned long teteDerniereReception = 0;
+volatile bool vpsConfigure = false;     // les lunettes ont un VPS configuré
+volatile bool vpsConnecte = false;      // les lunettes sont connectées au VPS
+volatile uint8_t sosConfirme = 0;       // dernier SOS confirmé par le VPS
+
+uint8_t adresseDiffusion[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};   // envoi à tous
+uint8_t numeroAnnonce = 0;
+
+// SOS en cours : numéro (1 à 255, 0 = aucun) envoyé aux lunettes jusqu'à confirmation
+uint8_t sosNumero = 0;
+uint8_t sosDernierNumero = 0;
+unsigned long sosDebut = 0;
+bool sosEchecAnnonce = false;
 
 // ------------------------------------------------------------
 //  Variables
@@ -97,9 +104,12 @@ long historique[NB_CAPTEURS][3];   // 3 dernières mesures de chaque capteur
 int  indexHisto[NB_CAPTEURS] = {0, 0, 0};
 long distance[NB_CAPTEURS] = {-1, -1, -1};
 
+// Obstacle présent ou non pour chaque capteur, avec hystérésis (voir mettreAJourEtats)
+bool bloque[NB_CAPTEURS] = {false, false, false};
+bool teteBloquee = false;
+
 int dernierMessage = MSG_AUCUN;
 unsigned long dernierMessageMs = 0;
-bool obstacleEnCours = false;
 bool annoncerToutDroit = false;
 
 // ============================================================
@@ -148,9 +158,40 @@ void surReception(const esp_now_recv_info_t* info, const uint8_t* data, int len)
   if (len != sizeof(PaquetLunettes)) return;
   PaquetLunettes p;
   memcpy(&p, data, sizeof(p));
-  if (p.code != CODE_PROJET) return;
-  teteDistance = p.distanceCm;
+  if (p.code != CODE_PROJET || p.type != PAQUET_LUNETTES) return;
+  teteDistance = p.teteCm;
+  vpsConfigure = p.vpsConfigure;
+  vpsConnecte = p.vpsConnecte;
+  sosConfirme = p.sosConfirme;
   teteDerniereReception = millis();
+}
+
+// État de la canne -> lunettes (qui le publient sur le VPS).
+void envoyerEtat() {
+  static unsigned long dernierEnvoi = 0;
+  if (millis() - dernierEnvoi < INTERVALLE_ETAT_MS) return;
+  dernierEnvoi = millis();
+  PaquetCanne p;
+  p.code = CODE_PROJET;
+  p.type = PAQUET_CANNE;
+  p.gaucheCm = (int16_t)distance[GAUCHE];
+  p.centreCm = (int16_t)distance[CENTRE];
+  p.droiteCm = (int16_t)distance[DROITE];
+  p.casqueConnecte = casqueConnecte ? 1 : 0;
+  p.sosNumero = sosNumero;
+  esp_now_send(adresseDiffusion, (uint8_t*)&p, sizeof(p));
+}
+
+// Message vocal joué -> lunettes (journal du tableau de bord). Envoyé 2 fois : ESP-NOW en
+// diffusion ne garantit pas la réception ; les lunettes ignorent le doublon.
+void envoyerAnnonce(int msg) {
+  PaquetAnnonce a;
+  a.code = CODE_PROJET;
+  a.type = PAQUET_ANNONCE;
+  a.message = (uint8_t)msg;
+  a.numero = ++numeroAnnonce;
+  esp_now_send(adresseDiffusion, (uint8_t*)&a, sizeof(a));
+  esp_now_send(adresseDiffusion, (uint8_t*)&a, sizeof(a));
 }
 
 bool lunettesConnectees() {
@@ -179,65 +220,74 @@ void forcerCanal(int canal) {
   esp_wifi_set_promiscuous(false);
 }
 
+// La canne ne se connecte pas au Wi-Fi : elle se cale seulement sur le canal du partage de
+// connexion, celui où les lunettes sont connectées, pour pouvoir leur parler en ESP-NOW.
 void demarrerRadio() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
 
   int canal = canalDuReseau(WIFI_SSID);
-
-  if (canal > 0) {
-    Serial.printf("Connexion au Wi-Fi \"%s\" (canal %d)...\n", WIFI_SSID, canal);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    unsigned long t = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t < 10000) delay(200);
+  if (canal == 0) {
+    canal = 1;
+    Serial.printf("Reseau \"%s\" introuvable : canal 1 par defaut\n", WIFI_SSID);
   }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    WiFi.setAutoReconnect(true);
-    WiFi.setSleep(false);   // sinon la veille radio fait perdre des paquets des lunettes
-    Serial.printf("Wi-Fi connecte, canal %d\n", WiFi.channel());
-  } else {
-    WiFi.setAutoReconnect(false);
-    WiFi.disconnect();
-    if (canal == 0) canal = 1;
-    forcerCanal(canal);
-    Serial.printf("Pas de Wi-Fi : fonctionnement local sur le canal %d (SOS et tableau de bord indisponibles)\n", canal);
-  }
+  forcerCanal(canal);
+  WiFi.setSleep(false);   // sinon la veille radio fait perdre des paquets des lunettes
+  Serial.printf("Canal radio : %d (meme canal que les lunettes)\n", canal);
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("ERREUR : ESP-NOW n'a pas demarre");
     return;
   }
+  esp_now_peer_info_t pair = {};
+  memcpy(pair.peer_addr, adresseDiffusion, 6);
+  pair.channel = 0;          // canal actuel
+  pair.encrypt = false;
+  if (esp_now_add_peer(&pair) != ESP_OK) {
+    Serial.println("ERREUR : impossible d'ajouter le destinataire ESP-NOW");
+  }
   esp_now_register_recv_cb(surReception);
-  Serial.println("ESP-NOW pret : en attente des lunettes");
+  Serial.println("ESP-NOW pret : liaison avec les lunettes");
 }
 
 // ============================================================
-//  SOS : envoyé au VPS par iot.cpp, qui le répète jusqu'à la
-//  confirmation Telegram. Aucune attente réseau ici.
+//  SOS : la canne choisit un numéro et l'envoie aux lunettes (dans PaquetCanne) jusqu'à
+//  ce que les lunettes renvoient ce numéro comme confirmé par le VPS.
 // ============================================================
 
 void declencherSOS() {
   Serial.println(">>> SOS declenche");
-  // VPS non configuré : aucune alerte ne pourra partir, on le dit tout de suite.
-  if (!iotIsConfigured()) {
-    Serial.println(">>> VPS non configure (config.h) : alerte impossible");
+  // Sans lunettes, ou lunettes sans VPS configuré : l'alerte ne peut pas partir.
+  if (!lunettesConnectees() || !vpsConfigure) {
+    Serial.println(lunettesConnectees() ? ">>> VPS non configure dans les lunettes : alerte impossible"
+                                        : ">>> Lunettes absentes : alerte impossible");
     jouer(MSG_ALERTE_ECHEC);
     return;
   }
-  if (!iotSosPending()) iotRequestSos();   // sinon : alerte déjà en cours d'envoi
-  // Sans Wi-Fi, on prévient tout de suite ; l'envoi reste tenté si le réseau revient.
-  if (WiFi.status() != WL_CONNECTED) jouer(MSG_ALERTE_ECHEC);
+  if (sosNumero != 0) return;   // alerte déjà en cours d'envoi
+  sosDernierNumero = (sosDernierNumero % 255) + 1;   // 1 à 255
+  sosNumero = sosDernierNumero;
+  sosDebut = millis();
+  sosEchecAnnonce = false;
+  Serial.printf(">>> SOS n°%u transmis aux lunettes\n", sosNumero);
+  // Sans connexion au VPS pour l'instant : on prévient ; l'envoi continue en arrière-plan.
+  if (!vpsConnecte) {
+    sosEchecAnnonce = true;
+    jouer(MSG_ALERTE_ECHEC);
+  }
 }
 
-// Résultat de l'alerte, annoncé dès que iot.cpp le connaît.
+// Résultat de l'alerte, annoncé dès que les lunettes le connaissent.
 void suivreSOS() {
-  if (iotTakeSosConfirmed()) {
-    Serial.println(">>> Alerte envoyee (confirmee par le VPS)");
+  if (sosNumero == 0) return;
+  if (sosConfirme == sosNumero) {
+    Serial.printf(">>> Alerte n°%u envoyee (confirmee par le VPS)\n", sosNumero);
+    sosNumero = 0;
     jouer(MSG_ALERTE_OK);
-  } else if (iotTakeSosLate() && WiFi.status() == WL_CONNECTED) {
+  } else if (!sosEchecAnnonce && millis() - sosDebut > SOS_DELAI_MS) {
     Serial.println(">>> Pas de confirmation apres 20 s : nouvel essai en arriere-plan");
+    sosEchecAnnonce = true;
     jouer(MSG_ALERTE_ECHEC);
   }
 }
@@ -263,24 +313,46 @@ void gererBoutonSOS() {
 //  Décision et voix
 // ============================================================
 
-bool bloque(long d) { return d >= 0 && d < SEUIL_OBSTACLE; }
 long espaceLibre(long d) { return d < 0 ? 9999 : d; }
 
-int decider(long g, long c, long d, long tete) {
-  if (tete >= 0 && tete < SEUIL_TETE) return MSG_HAUTEUR;   // priorité
+// Hystérésis : un obstacle apparaît sous le seuil et ne disparaît qu'au-dessus de
+// seuil + HYSTERESIS. Une distance qui hésite autour du seuil ne fait plus « clignoter »
+// l'obstacle (et ne déclenche plus des messages en boucle).
+bool etatAvecHysteresis(bool etat, long d, long seuil) {
+  if (!etat) return d >= 0 && d < seuil;
+  return d >= 0 && d < seuil + HYSTERESIS;
+}
 
-  bool G = bloque(g), C = bloque(c), D = bloque(d);
+void mettreAJourEtats(long tete) {
+  for (int i = 0; i < NB_CAPTEURS; i++) {
+    const long seuil = (i == CENTRE) ? SEUIL_CENTRE : SEUIL_COTE;
+    bloque[i] = etatAvecHysteresis(bloque[i], distance[i], seuil);
+  }
+  teteBloquee = etatAvecHysteresis(teteBloquee, tete, SEUIL_TETE);
+}
+
+int decider() {
+  if (teteBloquee) return MSG_HAUTEUR;   // priorité
+
+  const bool G = bloque[GAUCHE], C = bloque[CENTRE], D = bloque[DROITE];
 
   if (C) {
     if (G && D)  return MSG_STOP;
     if (!G && D) return MSG_ALLER_GAUCHE;
     if (G && !D) return MSG_ALLER_DROITE;
-    return espaceLibre(g) >= espaceLibre(d) ? MSG_ALLER_GAUCHE : MSG_ALLER_DROITE;
+    return espaceLibre(distance[GAUCHE]) >= espaceLibre(distance[DROITE]) ? MSG_ALLER_GAUCHE
+                                                                         : MSG_ALLER_DROITE;
   }
-  if (G && D) return MSG_TOUT_DROIT;   // passage étroit : on peut avancer au centre
+  if (G && D) return MSG_AUCUN;   // passage étroit, rien devant : on avance, rien à dire
   if (G)      return MSG_OBST_GAUCHE;
   if (D)      return MSG_OBST_DROITE;
   return MSG_AUCUN;
+}
+
+// Obstacle DEVANT : la personne doit changer de direction ou s'arrêter.
+bool estDevant(int msg) {
+  return msg == MSG_ALLER_GAUCHE || msg == MSG_ALLER_DROITE || msg == MSG_STOP ||
+         msg == MSG_HAUTEUR;
 }
 
 void jouer(int msg) {
@@ -291,30 +363,43 @@ void jouer(int msg) {
   dernierMessage = msg;
   dernierMessageMs = millis();
   Serial.printf("    [voix] message %d\n", msg);
-  if (msg > 0 && msg <= MSG_ALERTE_ECHEC) iotReportMessage(msg, TEXTE_MSG[msg]);
+  if (msg > 0 && msg <= MSG_ALERTE_ECHEC) envoyerAnnonce(msg);
 }
 
-// Décide si le message doit être dit maintenant (anti-répétition).
+// Décide si un message doit être dit maintenant. Règles :
+//  - chaque nouvelle situation est annoncée une fois ;
+//  - un obstacle DEVANT est répété toutes les 4 s tant qu'il est là ;
+//  - un obstacle sur le CÔTÉ n'est dit qu'une fois (redit s'il disparaît puis revient) ;
+//  - « Continuez tout droit » : une seule fois, quand un obstacle DEVANT vient de disparaître ;
+//  - « Obstacle en hauteur » passe en priorité, sans attendre la fin du message en cours.
 void annoncer(int msg) {
-  unsigned long ecoule = millis() - dernierMessageMs;
+  static int situationPrecedente = MSG_AUCUN;
+  static int aDire = MSG_AUCUN;   // nouvelle situation pas encore annoncée
 
-  if (msg == MSG_AUCUN) {
-    if (obstacleEnCours) { obstacleEnCours = false; annoncerToutDroit = true; }
-    if (annoncerToutDroit && ecoule >= MIN_ENTRE_MESSAGES) {
+  if (msg != situationPrecedente) {
+    if (estDevant(situationPrecedente) && !estDevant(msg)) annoncerToutDroit = true;
+    situationPrecedente = msg;
+    aDire = msg;
+    if (msg == MSG_HAUTEUR) {   // urgent
       annoncerToutDroit = false;
-      jouer(MSG_TOUT_DROIT);
+      aDire = MSG_AUCUN;
+      jouer(MSG_HAUTEUR);
+      return;
     }
-    return;
   }
+  if (estDevant(msg)) annoncerToutDroit = false;
 
-  obstacleEnCours = true;
-  annoncerToutDroit = false;
+  if (millis() - dernierMessageMs < MIN_ENTRE_MESSAGES) return;   // laisser finir le message
 
-  bool urgent    = (msg == MSG_HAUTEUR && dernierMessage != MSG_HAUTEUR);
-  bool nouveau   = (msg != dernierMessage && ecoule >= MIN_ENTRE_MESSAGES);
-  bool repetition = (msg == dernierMessage && ecoule >= REPETITION_MS);
-
-  if (urgent || nouveau || repetition) jouer(msg);
+  if (annoncerToutDroit) {
+    annoncerToutDroit = false;
+    jouer(MSG_TOUT_DROIT);
+  } else if (aDire != MSG_AUCUN) {
+    jouer(aDire);
+    aDire = MSG_AUCUN;
+  } else if (estDevant(msg) && millis() - dernierMessageMs >= REPETITION_MS) {
+    jouer(msg);
+  }
 }
 
 // ============================================================
@@ -336,7 +421,8 @@ void afficherEtat(int msg) {
   } else {
     Serial.print("Tete: (lunettes absentes)  ");
   }
-  Serial.printf("Casque: %s  -> decision %d\n", casqueConnecte ? "ok" : "--", msg);
+  Serial.printf("Casque: %s  VPS: %s  -> decision %d\n", casqueConnecte ? "ok" : "--",
+                lunettesConnectees() && vpsConnecte ? "ok" : "--", msg);
 }
 
 // ============================================================
@@ -358,17 +444,6 @@ void setup() {
   pinMode(BOUTON_SOS, INPUT_PULLUP);
 
   demarrerRadio();
-  iotBegin();
-
-  // La connexion TLS au VPS demande un grand bloc de mémoire d'un seul tenant :
-  // on l'ouvre AVANT le Bluetooth, qui en consomme beaucoup (20 s au plus).
-  if (iotIsConfigured() && WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connexion au VPS avant le Bluetooth...");
-    unsigned long t = millis();
-    while (!iotIsConnected() && millis() - t < 20000) delay(100);
-  }
-  Serial.printf("[memoire] avant Bluetooth : libre=%u, plus grand bloc=%u\n",
-                (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   audioBegin(BT_HEADSET_NAME);
   Serial.printf("[memoire] apres Bluetooth : libre=%u, plus grand bloc=%u\n",
                 (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -395,11 +470,12 @@ void loop() {
   }
 
   long tete = lunettesConnectees() ? teteDistance : -1;
-  int msg = decider(distance[GAUCHE], distance[CENTRE], distance[DROITE], tete);
+  mettreAJourEtats(tete);
+  int msg = decider();
   annoncer(msg);
   afficherEtat(msg);
 
-  iotSetState(distance[GAUCHE], distance[CENTRE], distance[DROITE], tete, lunettesConnectees());
+  envoyerEtat();
   suivreSOS();
   suivreCasque();
 }

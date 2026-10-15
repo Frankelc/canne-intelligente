@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Écrit deploy/config-mqtt.h : les lignes MQTT à recopier dans firmware/canne/config.h.
+# Écrit deploy/config-mqtt.h : les lignes MQTT à recopier dans firmware/lunettes/config.h.
 # Contient un mot de passe : ne pas le committer ni le partager.
 set -euo pipefail
 
@@ -13,7 +13,7 @@ ca="$(curl -fsSL https://letsencrypt.org/certs/isrgrootx1.pem)"
 grep -q "BEGIN CERTIFICATE" <<<"$ca" || die "Téléchargement du certificat ISRG Root X1 impossible"
 
 {
-  echo "// Généré par deploy/esp32-config.sh — à recopier dans firmware/canne/config.h"
+  echo "// Généré par deploy/esp32-config.sh — à recopier dans firmware/lunettes/config.h"
   echo "#define MQTT_HOST \"$(env_get DOMAIN)\""
   echo "#define MQTT_PORT 8883"
   echo "#define MQTT_USER \"$(env_get MQTT_USER)\""

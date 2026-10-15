@@ -123,7 +123,7 @@ else
   warn "Le test TLS sur $DOMAIN:8883 a échoué : voir docker compose logs mosquitto"
 fi
 
-# 10. Fichier prêt à copier dans firmware/canne/config.h
+# 10. Fichier prêt à copier dans firmware/lunettes/config.h
 bash deploy/esp32-config.sh
 
 cat <<EOF
@@ -135,7 +135,7 @@ Dashboard : https://$DOMAIN
   utilisateur  : $(env_get DASHBOARD_USER)
   mot de passe : $(env_get DASHBOARD_PASSWORD)
 
-Paramètres ESP32 : deploy/config-mqtt.h (à recopier dans firmware/canne/config.h)
+Paramètres ESP32 : deploy/config-mqtt.h (à recopier dans firmware/lunettes/config.h)
 Tester Telegram  : sudo bash deploy/test-sos.sh
 Logs             : docker compose logs -f
 =========================================================

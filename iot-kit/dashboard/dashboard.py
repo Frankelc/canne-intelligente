@@ -1,4 +1,12 @@
-"""Petit tableau de bord MQTT en lecture seule pour la démonstration IFRI."""
+"""Petit tableau de bord MQTT en lecture seule pour la démonstration IFRI.
+
+Architecture finale : la canne n'a pas d'Internet. Les lunettes (passerelle) reçoivent ses
+données en ESP-NOW et publient tout sur MQTT/TLS. Donc :
+  - « availability » (online/offline, Last Will) décrit la PASSERELLE, pas la canne ;
+  - la télémétrie indique si la canne est joignable (espnow) et si son casque est connecté
+    (headset) ; rssi et uptime_s sont ceux des lunettes.
+Le contrat de /api/state est inchangé : la page index.html interprète ces champs.
+"""
 import json
 import os
 import threading
@@ -41,7 +49,7 @@ def require_password():
 lock = threading.Lock()
 state = {"telemetry": None, "telemetry_at": None, "availability": "inconnue", "events": [],
          "stats": {"annonces": 0, "hauteur": 0, "sos": 0}}
-HEAD_MP3 = 6  # « Attention, obstacle en hauteur »
+HEAD_MP3 = 6  # message n° 6 de la canne : « Attention, obstacle en hauteur »
 
 INDEX = Path(__file__).with_name("index.html")
 
@@ -60,7 +68,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         client.subscribe([(f"{PREFIX}/telemetry", 0), (f"{PREFIX}/event", 1), (f"{PREFIX}/sos", 1),
                           (f"{PREFIX}/sos/ack", 1), (f"{PREFIX}/availability", 1)])
-        print("Dashboard abonné aux sujets de la canne")
+        print("Dashboard abonné aux sujets de la canne (publiés par la passerelle)")
     else:
         print(f"Connexion MQTT refusée : {reason_code}")
 
@@ -79,8 +87,9 @@ def on_message(client, userdata, message):
         elif suffix == "availability":
             state["availability"] = str(payload)[:20]
         elif suffix == "sos" and isinstance(payload, dict):
+            # event_id = « 8 caractères hexadécimaux-numéro », ex. a3f09c1e-7 (lunettes/iot.cpp)
             event_id = str(payload.get("event_id", ""))[:40]
-            if not find_sos(event_id):  # la canne répète le SOS jusqu'à l'accusé
+            if not find_sos(event_id):  # la passerelle répète le SOS jusqu'à l'accusé
                 add_event({"type": "SOS", "message": "Demande d'assistance", "event_id": event_id,
                            "status": "En attente de Telegram", "confirmed": False})
                 state["stats"]["sos"] += 1

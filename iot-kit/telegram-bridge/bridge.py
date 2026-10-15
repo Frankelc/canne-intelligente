@@ -1,9 +1,11 @@
-"""Relais MQTT SOS vers Telegram, avec accusé de réception vers la canne.
+"""Relais MQTT SOS vers Telegram, avec accusé de réception vers la passerelle.
 
-La canne republie le même SOS (même event_id) toutes les 5 s tant qu'elle n'a pas reçu
-d'accusé sur <préfixe>/sos/ack. Le relais n'envoie Telegram qu'une fois par event_id
+La canne n'a pas d'Internet : son bouton SOS passe par les lunettes (ESP-NOW), qui servent
+de passerelle MQTT/TLS. Les lunettes republient le même SOS (même event_id) toutes les 5 s
+tant qu'elles n'ont pas reçu d'accusé sur <préfixe>/sos/ack, puis confirment à la canne,
+qui annonce « Alerte envoyée ». Le relais n'envoie Telegram qu'une fois par event_id
 (liste conservée dans /data, donc après un redémarrage aussi) et répond à chaque répétition.
-Sans accusé, la canne continue d'essayer : un échec Telegram n'est jamais perdu en silence.
+Sans accusé, la passerelle continue d'essayer : un échec Telegram n'est jamais perdu en silence.
 Le jeton Telegram reste sur le VPS.
 """
 import json
@@ -27,6 +29,7 @@ SEEN_FILE = Path(os.getenv("SOS_SEEN_FILE", "/data/sos_seen.json"))
 
 SOS_TOPIC = f"{PREFIX}/sos"
 ACK_TOPIC = f"{PREFIX}/sos/ack"
+# Format des lunettes : 8 caractères hexadécimaux, un tiret, le numéro du SOS (ex. a3f09c1e-7).
 EVENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 MAX_SEEN = 300
 
@@ -114,7 +117,7 @@ def on_message(client, userdata, message):
         if age >= 60:
             text += f"\nAlerte retardée de {age // 60} min (réseau indisponible)."
         if not send_telegram(text):
-            print(f"SOS {event_id} non transmis ; la canne va réessayer")
+            print(f"SOS {event_id} non transmis ; la passerelle va réessayer")
             return
         last_sent = now
         status = "envoye"

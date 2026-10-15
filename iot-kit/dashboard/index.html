@@ -1,370 +1,636 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-theme="sombre">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>Canne connectée · supervision</title>
+<script>
+// Thème appliqué avant l'affichage, pour éviter un éclair de la mauvaise couleur.
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("theme"); } catch (e) {}
+  var q = new URLSearchParams(location.search).get("theme");
+  if (q) t = q;
+  document.documentElement.setAttribute("data-theme", t === "clair" ? "clair" : "sombre");
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#08090d;
-  --ink:#10131a;
-  --ink-2:#161b24;
-  --ink-3:#1c2230;
-  --line:#2a3140;
-  --line-2:#3a4254;
-  --paper:#f3f4f8;
-  --muted:#a8b0c2;
-  --dim:#7b8498;
-  --tactile:#f2c94c;
-  --tactile-ink:#1a1404;
-  --danger:#ef4f5f;
-  --warn:#f2994a;
-  --free:#3ecf8e;
-  --info:#5aa9e6;
-  --radius:14px;
-  --font:"Atkinson Hyperlegible",system-ui,sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,monospace;
-  --shadow:0 12px 40px #0006;
+/* ------------------------------------------------------------------ jetons -- */
+:root {
+  /* Espacements sur une échelle de 4 px */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, "Segoe UI", sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  --fast: 160ms;
 }
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--paper)}
-body{
-  font:16px/1.45 var(--font);
-  min-height:100vh;
-  overflow-x:hidden;
-  background-image:
-    radial-gradient(1200px 480px at 10% -10%, #f2c94c12, transparent 55%),
-    radial-gradient(900px 420px at 100% 0%, #5aa9e610, transparent 50%),
-    repeating-linear-gradient(-32deg, transparent 0 18px, #ffffff03 18px 19px);
+/* Écran (par défaut) : graphite froid, un seul accent bleu signalétique */
+:root, [data-theme="sombre"] {
+  --canvas: #0e1115;
+  --surface: #151a20;
+  --surface-2: #1c2229;
+  --ink: #eceff3;
+  --ink-soft: #a9b2be;
+  --ink-faint: #8d97a4;
+  --hair: rgb(236 239 243 / .11);
+  --hair-strong: rgb(236 239 243 / .22);
+  --accent: #79a3ff;
+  --accent-ink: #0a1222;
+  --accent-soft: rgb(121 163 255 / .14);
+  --danger: #ff7480;
+  --warn: #f2b44e;
+  --free: #52cf92;
+  --sos: #9d1b2a;
+  --shadow: 215 45% 2%;
+  --tone: .16;
+  color-scheme: dark;
 }
-a.skip{
-  position:absolute;left:12px;top:-48px;z-index:30;
-  background:var(--tactile);color:var(--tactile-ink);font-weight:700;
-  padding:8px 14px;border-radius:8px;
+/* Mode projecteur : fond clair, contrastes renforcés, texte agrandi */
+[data-theme="clair"] {
+  --canvas: #e9edf1;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --ink: #10151b;
+  --ink-soft: #424c58;
+  --ink-faint: #56606c;
+  --hair: rgb(16 21 27 / .13);
+  --hair-strong: rgb(16 21 27 / .28);
+  --accent: #1a4cc0;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(26 76 192 / .1);
+  --danger: #bd1f35;
+  --warn: #935400;
+  --free: #11714a;
+  --shadow: 215 30% 30%;
+  --tone: .13;
+  color-scheme: light;
+  font-size: 112.5%;
 }
-a.skip:focus{top:12px}
-.wrap{max-width:1440px;margin:0 auto;padding:12px 18px 20px}
+:root {
+  --e1: 0 1px 2px hsl(var(--shadow) / .22), 0 2px 6px -1px hsl(var(--shadow) / .16);
+  --e2: 0 2px 4px hsl(var(--shadow) / .2), 0 8px 18px -4px hsl(var(--shadow) / .26);
+  --e3: 0 4px 8px hsl(var(--shadow) / .2), 0 18px 40px -8px hsl(var(--shadow) / .34);
+  --edge: inset 0 1px 0 rgb(255 255 255 / .04);
+}
+[data-theme="clair"] { --edge: inset 0 1px 0 rgb(255 255 255 / .9); }
 
-.sim{
-  display:none;position:sticky;top:0;z-index:15;
-  background:var(--tactile);color:var(--tactile-ink);
-  font-weight:700;font-size:.92rem;text-align:center;
-  padding:9px 16px;letter-spacing:.02em;
-  box-shadow:inset 0 4px 0 #111, inset 0 -4px 0 #111;
-}
-body.demo .sim{display:block}
+/* États : la couleur n'est jamais seule, un mot et une forme l'accompagnent */
+[data-s="ok"]   { --c: var(--free); }
+[data-s="warn"] { --c: var(--warn); }
+[data-s="bad"]  { --c: var(--danger); }
+[data-s="idle"] { --c: var(--ink-faint); }
 
-header.top{
-  display:flex;align-items:center;justify-content:space-between;gap:20px;
-  padding:10px 0 12px;margin-bottom:12px;
-  border-bottom:1px solid var(--line);
+/* ------------------------------------------------------------------- base -- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--font);
+  letter-spacing: .01em;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
-.brand{display:flex;align-items:center;gap:14px;min-width:0}
-.logo{
-  width:44px;height:44px;flex:none;border-radius:12px;
-  background:var(--tactile);color:var(--tactile-ink);
-  display:grid;place-items:center;
-  box-shadow:0 0 0 4px #f2c94c22;
+[data-theme="clair"] body { letter-spacing: 0; }
+svg { display: block; }
+button { font: inherit; color: inherit; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+:root { caret-color: var(--accent); accent-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+@supports (scrollbar-color: auto) {
+  * { scrollbar-color: var(--hair-strong) transparent; scrollbar-width: thin; }
 }
-.title h1{margin:0;font-size:clamp(1.2rem,2vw,1.5rem);line-height:1.15;font-weight:700;letter-spacing:-.02em}
-.title p{margin:3px 0 0;color:var(--muted);font-size:.88rem}
-.hdr-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
-.live{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:7px 12px;border-radius:999px;border:1px solid var(--line);
-  background:var(--ink);font-weight:700;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--muted);
-}
-.live .pulse{width:8px;height:8px;border-radius:50%;background:var(--dim)}
-.live.on{color:var(--free);border-color:#3ecf8e44;background:#3ecf8e12}
-.live.on .pulse{background:var(--free);box-shadow:0 0 0 4px #3ecf8e33;animation:pulse 1.8s ease-out infinite}
-.live.stale{color:var(--warn);border-color:#f2994a55;background:#f2994a14}
-.live.stale .pulse{background:var(--warn)}
-.live.off{color:var(--danger);border-color:#ef4f5f55;background:#ef4f5f12}
-.live.off .pulse{background:var(--danger)}
-.clock{font:600 1.45rem/1 var(--mono);color:var(--paper);text-align:right;white-space:nowrap}
-.clock small{display:block;margin-top:4px;font:400 .8rem var(--font);color:var(--muted)}
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.err{
-  display:none;margin:0 0 14px;padding:12px 16px;border-radius:var(--radius);
-  background:#ef4f5f18;border:1px solid #ef4f5f66;color:#ffd6db;font-weight:700;
+a.skip {
+  position: absolute; left: var(--s3); top: -64px; z-index: 40;
+  background: var(--accent); color: var(--accent-ink); font-weight: 700;
+  padding: var(--s2) var(--s4); border-radius: var(--r-md); text-decoration: none;
 }
-.err.show{display:flex;align-items:center;gap:10px}
+a.skip:focus { top: var(--s3); }
 
-.status{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px}
-.chip{
-  background:var(--ink);border:1px solid var(--line);border-radius:var(--radius);
-  padding:10px 12px;display:flex;gap:10px;align-items:center;min-width:0;
-  box-shadow:var(--shadow);
-}
-.chip>div{min-width:0}
-.dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--dim)}
-.chip.ok .dot{background:var(--free)}
-.chip.warn .dot{background:var(--warn)}
-.chip.bad .dot{background:var(--danger);animation:pulse 1.6s ease-in-out infinite}
-.chip.ok{border-color:#3ecf8e33}
-.chip.warn{border-color:#f2994a44}
-.chip.bad{border-color:#ef4f5f66;background:#ef4f5f0d}
-.chip .k{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700;white-space:nowrap}
-.chip .v{font-weight:700;font-size:1.02rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-left:6px;vertical-align:-1px}
-.bars i{width:4px;background:var(--line-2);border-radius:1px}
-.bars i.on{background:var(--paper)}
-.batt{display:inline-flex;align-items:center;gap:8px}
-.batt-track{width:42px;height:8px;border-radius:99px;background:var(--ink-3);border:1px solid var(--line-2);overflow:hidden}
-.batt-fill{height:100%;border-radius:99px;background:var(--free)}
+.wrap { max-width: 1480px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 32px) var(--s6); }
 
-.grid{display:grid;grid-template-columns:minmax(0,1.32fr) minmax(0,1fr);gap:12px}
-.col{display:grid;gap:12px;align-content:start;min-width:0}
-.panel{
-  min-width:0;background:var(--ink);border:1px solid var(--line);
-  border-radius:var(--radius);padding:14px 16px;position:relative;overflow:hidden;
-  box-shadow:var(--shadow);
+.sim {
+  display: none;
+  background: var(--accent); color: var(--accent-ink);
+  font-weight: 600; font-size: .9375rem; text-align: center;
+  padding: var(--s2) var(--s4);
 }
-.panel.radar,.panel.profile{overflow:visible}
-.panel h2{margin:0;font-size:1.05rem;font-weight:700;color:var(--paper);letter-spacing:-.01em}
-.panel .sub{margin:2px 0 10px;color:var(--muted);font-size:.85rem}
-.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+body.demo .sim { display: block; }
 
-.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 0}
-.kpi{
-  background:var(--ink-2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;text-align:center;
+/* ----------------------------------------------------------------- en-tête -- */
+header.top {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s5);
+  padding: var(--s4) 0;
+  border-bottom: 1px solid var(--hair);
 }
-.kpi .dir{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.kpi .val{font:600 1.25rem/1.2 var(--mono);margin-top:4px}
-.kpi.danger .val{color:var(--danger)}
-.kpi.warn .val{color:var(--warn)}
-.kpi.free .val{color:var(--free)}
-.kpi.idle .val{color:var(--dim)}
+.brand { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.mark {
+  width: 44px; height: 44px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--hair);
+}
+.mark .stick { stroke: var(--ink); }
+.mark .tip { stroke: var(--danger); }
+.brand { flex: 1 1 auto; }
+.brand h1 {
+  margin: 0; font-size: 1.375rem; line-height: 1.2; font-weight: 700; letter-spacing: -.015em;
+  text-wrap: balance;
+}
+.brand p { margin: 2px 0 0; color: var(--ink-soft); font-size: .9375rem; }
 
-.radar svg,.profile svg{width:100%;height:auto;display:block}
-.radar svg{max-height:min(38vh,340px)}
-.profile svg{max-height:min(26vh,220px)}
-.ring{fill:none;stroke:#ffffff14;stroke-dasharray:2 6}
-.ring.z50{stroke:#ef4f5f55;stroke-dasharray:none}
-.ring.z120{stroke:#f2994a44;stroke-dasharray:none}
-.ringlbl{fill:var(--dim);font:500 12px var(--mono)}
-.cone-bg{fill:#ffffff05;stroke:#ffffff10}
-.cone{transition:d .4s}
-.arc{fill:none;stroke-width:5;stroke-linecap:round}
-.lbl{font:700 13px var(--font);fill:var(--muted)}
-.dist{font:600 18px var(--mono)}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);margin-top:8px}
-.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:0}
+.tools { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; justify-content: flex-end; }
+.pill {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-height: 40px; padding: 0 var(--s3);
+  border: 1px solid var(--hair-strong); border-radius: var(--r-md);
+  font-weight: 600; font-size: .9375rem; color: var(--c);
+  background: var(--surface);
+}
+.pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+.pill[data-s="ok"] .dot { animation: beat 2s ease-in-out infinite; }
+.clock { text-align: right; line-height: 1.15; padding: 0 var(--s2); }
+.clock .num { font-size: 1.5rem; font-weight: 600; }
+.clock small { display: block; color: var(--ink-soft); font-size: .8125rem; margin-top: 2px; }
 
-.profile svg{width:100%;height:auto;display:block}
-.beam{opacity:.9}
-.zone-txt{font:700 12px var(--font);letter-spacing:.05em;text-transform:uppercase}
+.btn {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-height: 40px; padding: 0 var(--s4);
+  border: 1px solid var(--hair-strong); border-radius: var(--r-md);
+  background: var(--surface); color: var(--ink);
+  font-weight: 600; font-size: .9375rem; white-space: nowrap; cursor: pointer;
+  box-shadow: var(--e1), var(--edge);
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease), transform 120ms var(--ease);
+}
+.btn svg { flex: none; }
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { background: var(--surface-2); border-color: var(--ink-faint); }
+}
+.btn:active { transform: translateY(1px); }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 
-.voice{display:flex;flex-direction:column;gap:12px}
-.voice .sub{margin-bottom:0}
-.said{
-  min-height:108px;display:flex;flex-direction:column;justify-content:center;
-  border-radius:12px;padding:16px 16px 14px;
-  background:linear-gradient(180deg, var(--ink-3), var(--ink-2));
-  border:1px solid var(--line-2);border-left:4px solid var(--tactile);
+.err {
+  display: none; align-items: center; gap: var(--s3);
+  margin-top: var(--s4); padding: var(--s3) var(--s4);
+  border: 1px solid var(--danger); border-radius: var(--r-md);
+  background: var(--surface); color: var(--ink); font-weight: 600;
 }
-.said q{quotes:"« " " »";font-weight:700;font-size:clamp(1.35rem,2.1vw,1.9rem);line-height:1.18;letter-spacing:-.02em}
-.said .meta{margin-top:10px;color:var(--muted);font-size:.85rem;display:flex;align-items:center;gap:10px}
-.said.fresh{animation:flash .8s ease-out}
-.eq{display:inline-flex;gap:3px;align-items:center;height:16px}
-.eq i{width:3px;height:4px;background:var(--tactile);border-radius:2px}
-.said.fresh .eq i{animation:eq .5s ease-in-out 4 alternate}
-.eq i:nth-child(2){animation-delay:.12s!important}
-.eq i:nth-child(3){animation-delay:.24s!important}
-.eq i:nth-child(4){animation-delay:.08s!important}
-.eq i:nth-child(5){animation-delay:.3s!important}
+.err svg { color: var(--danger); flex: none; }
+.err.show { display: flex; }
 
-button.speak{
-  font:700 .95rem var(--font);color:var(--paper);background:var(--ink-2);
-  border:1px solid var(--line-2);border-radius:12px;padding:11px 14px;cursor:pointer;
-  display:flex;gap:10px;align-items:center;justify-content:center;width:100%;
-  transition:border-color .15s, background .15s, color .15s;
+/* ----------------------------------------------------------------- panneaux -- */
+.panel {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  padding: var(--s5);
+  box-shadow: var(--e1), var(--edge);
 }
-button.speak:hover{border-color:var(--muted);background:var(--ink-3)}
-button.speak[aria-pressed="true"]{border-color:var(--tactile);color:var(--tactile);background:#f2c94c12}
-button.speak:disabled{opacity:.5;cursor:not-allowed}
-button:focus-visible{outline:3px solid var(--info);outline-offset:3px}
+.ph h2 { margin: 0; font-size: 1.125rem; line-height: 1.3; font-weight: 700; letter-spacing: -.01em; }
+.ph p { margin: 2px 0 0; color: var(--ink-soft); font-size: .9375rem; text-wrap: pretty; }
 
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.stat{background:var(--ink-2);border:1px solid var(--line);border-radius:12px;padding:12px 12px}
-.stat .n{font:600 1.75rem/1 var(--mono)}
-.stat .t{color:var(--muted);font-size:.78rem;margin-top:6px}
+/* ------------------------------------------------- chaîne de liaison -- */
+.chain-panel { margin-top: var(--s5); padding-bottom: 0; container-type: inline-size; }
+.chain {
+  display: grid;
+  grid-template-columns: auto minmax(48px, 1fr) auto minmax(48px, 1fr) auto minmax(48px, 1fr) auto minmax(48px, 1fr) auto;
+  align-items: center;
+  margin-top: var(--s4);
+}
+.node { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.node-ic {
+  width: 44px; height: 44px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center;
+  background: var(--surface-2); color: var(--ink-soft);
+  border: 1px solid var(--hair);
+}
+.node[data-s="ok"] .node-ic,
+.node[data-s="bad"] .node-ic,
+.node[data-s="warn"] .node-ic { color: var(--c); border-color: var(--c); }
+.node-k { display: block; font-size: .8125rem; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
+.node-v { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--c); white-space: nowrap; }
+.shape { width: 16px; height: 16px; flex: none; }
 
-.log{list-style:none;margin:0;padding:0 4px 0 0;max-height:min(32vh,280px);overflow:auto}
-.log::-webkit-scrollbar{width:8px}
-.log::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px}
-.log::-webkit-scrollbar-track{background:transparent}
-.log li{
-  display:grid;grid-template-columns:32px 1fr auto;gap:12px;align-items:center;
-  padding:10px 6px;border-bottom:1px solid var(--line);
+.link { position: relative; height: 44px; margin: 0 var(--s3); }
+.link::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 2px solid var(--c);
 }
-.log li:last-child{border-bottom:0}
-.log .ic{
-  width:32px;height:32px;border-radius:9px;display:grid;place-items:center;
-  background:var(--ink-2);color:var(--muted);border:1px solid var(--line);
+.link[data-s="idle"]::before { border-top-style: dashed; opacity: .7; }
+.link[data-s="bad"]::before  { border-top-style: dashed; }
+.link span {
+  position: absolute; left: 0; right: 0; bottom: calc(50% + 5px);
+  text-align: center; font-size: .75rem; color: var(--ink-soft); white-space: nowrap;
 }
-.log .ic svg{display:block}
-.log li.sos{background:#ef4f5f14;border-radius:10px;border:1px solid #ef4f5f33;margin:4px 0;padding:10px 8px}
-.log li.sos .ic{background:var(--danger);color:#fff;border-color:transparent}
-.log .m{font-weight:700;font-size:.95rem}
-.log .s{font-size:.82rem;color:var(--muted)}
-.log .s.ok{color:var(--free)}
-.log .s.wait{color:var(--warn)}
-.log time{font:500 .8rem var(--mono);color:var(--dim);white-space:nowrap}
-.empty{
-  color:var(--muted);border:1px dashed var(--line-2);border-radius:12px;
-  padding:22px 16px;text-align:center;display:grid;gap:6px;justify-items:center;
+.chain-note {
+  margin: var(--s4) 0 0; color: var(--ink-soft); font-size: .9375rem; min-height: 1.55em;
+}
+.chain-note:empty { display: none; }
+
+.metrics {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: var(--s5) calc(var(--s5) * -1) 0;
+  border-top: 1px solid var(--hair);
+}
+.metric { padding: var(--s3) var(--s5) var(--s4); min-width: 0; }
+.metric + .metric { border-left: 1px solid var(--hair); }
+.metric dt { font-size: .8125rem; font-weight: 600; color: var(--ink-soft); }
+.metric dd { margin: 2px 0 0; font-size: 1.125rem; font-weight: 600; display: flex; align-items: center; gap: var(--s2); white-space: nowrap; }
+.bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 14px; }
+.bars i { width: 4px; background: var(--hair-strong); border-radius: 1px; }
+.bars i.on { background: var(--ink); }
+.gauge { width: 46px; height: 10px; border-radius: 3px; border: 1px solid var(--hair-strong); padding: 1px; }
+.gauge i { display: block; height: 100%; border-radius: 2px; background: var(--c); }
+
+/* -------------------------------------------------------- grille principale -- */
+.grid {
+  display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: var(--s5); margin-top: var(--s5); align-items: start;
+}
+.col { display: grid; gap: var(--s5); min-width: 0; }
+
+/* Radar */
+.radar-svg { width: 100%; height: auto; max-height: min(40vh, 430px); margin-top: var(--s3); }
+.ring { fill: none; stroke: var(--hair-strong); stroke-width: 1; stroke-dasharray: 2 6; }
+.ring.base { stroke-dasharray: none; }
+.ring-lbl { fill: var(--ink-faint); font: 400 13px var(--mono); }
+.sector { fill: var(--ink); fill-opacity: .035; stroke: var(--hair); }
+.cone { fill: var(--c); fill-opacity: var(--tone); transition: d 300ms var(--ease); }
+.cone[data-s="idle"] { fill-opacity: 0; }
+.cone[data-empty] { fill-opacity: .06; }
+.cone[data-s="bad"] { fill: url(#hatch); fill-opacity: 1; }
+.hatch-bg { fill: var(--danger); fill-opacity: .14; }
+.hatch-line { stroke: var(--danger); stroke-opacity: .55; stroke-width: 3; }
+.band { fill: var(--warn); fill-opacity: .1; }
+.seuil { fill: none; stroke: var(--ink-soft); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.seuil-lbl {
+  fill: var(--ink-soft); font: 600 13px var(--mono);
+  paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round;
+}
+.obstacle { fill: none; stroke: var(--c); stroke-width: 6; stroke-linecap: round; }
+.sector-lbl { fill: var(--ink-soft); font: 600 15px var(--font); }
+.origin { fill: var(--ink); }
+.origin-lbl { fill: var(--ink-soft); font: 600 13px var(--font); }
+
+.reads {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: var(--s4); border-top: 1px solid var(--hair);
+}
+.read { padding: var(--s4) var(--s3) 0; min-width: 0; }
+.read:first-child { padding-left: 0; }
+.read + .read { border-left: 1px solid var(--hair); padding-left: var(--s4); }
+.read-k { font-size: .875rem; font-weight: 600; color: var(--ink-soft); }
+.read-k small { display: block; font-weight: 400; color: var(--ink-faint); font-size: .8125rem; }
+.read-v {
+  display: block; margin-top: var(--s1);
+  font: 600 clamp(2rem, 1.2rem + 2.2vw, 3.25rem)/1.05 var(--mono);
+  letter-spacing: -.02em; color: var(--c); white-space: nowrap;
+}
+.read-v .u { font-size: .42em; letter-spacing: 0; color: var(--ink-soft); margin-left: .2em; }
+.read-v.word { font-family: var(--font); font-size: clamp(1.5rem, 1rem + 1.4vw, 2.25rem); letter-spacing: -.01em; }
+.read-s { display: flex; align-items: center; gap: 6px; margin-top: var(--s2); font-size: .875rem; font-weight: 600; color: var(--c); }
+
+.legend {
+  list-style: none; margin: var(--s5) 0 0; padding: var(--s4) 0 0;
+  border-top: 1px solid var(--hair);
+  display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5);
+  font-size: .875rem; color: var(--ink-soft);
+}
+.legend li { display: flex; align-items: center; gap: var(--s2); }
+.legend .shape { color: var(--c); }
+.legend b { color: var(--ink); font-weight: 600; }
+
+/* Profil */
+.profile-svg { width: 100%; height: auto; max-height: min(30vh, 260px); margin-top: var(--s3); }
+.row-zone { fill: var(--ink); fill-opacity: .03; stroke: var(--hair-strong); stroke-dasharray: 4 6; }
+.row-lbl { fill: var(--ink-soft); font: 600 14px var(--font); }
+.row-lbl.court { display: none; }
+.ground { stroke: var(--hair-strong); stroke-width: 2; }
+.body-line { fill: none; stroke: var(--ink); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+.head-dot { fill: var(--ink); }
+.glasses { fill: var(--accent); }
+.cane { stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+.cane-tip { stroke: var(--danger); stroke-width: 4; stroke-linecap: round; }
+.beam { fill: var(--c); fill-opacity: var(--tone); }
+.beam[data-s="idle"] { fill-opacity: .05; fill: var(--ink); }
+.obs { fill: var(--c); transition: opacity var(--fast) var(--ease); }
+.obs[data-s="bad"] { fill: url(#hatch-p); stroke: var(--danger); stroke-width: 2; }
+.dist { font: 600 18px var(--mono); fill: var(--c); }
+.dist.word { font: 600 15px var(--font); }
+
+/* Voix */
+.said {
+  position: relative; margin-top: var(--s4);
+  min-height: 132px; display: flex; flex-direction: column; justify-content: center;
+  padding: var(--s5); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--hair);
+  overflow: hidden;
+}
+.said::after {
+  content: ""; position: absolute; inset: 0; background: var(--accent-soft);
+  opacity: 0; pointer-events: none;
+}
+.said.fresh::after { animation: flash 900ms var(--ease); }
+.said q {
+  position: relative; quotes: "« " " »";
+  font-weight: 700; font-size: clamp(1.5rem, 1.05rem + 1.5vw, 2.375rem);
+  line-height: 1.15; letter-spacing: -.02em; text-wrap: balance;
+}
+.said .meta { position: relative; margin-top: var(--s3); color: var(--ink-soft); font-size: .9375rem; display: flex; align-items: center; gap: var(--s3); }
+.eq { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
+.eq i { width: 3px; height: 16px; background: var(--accent); border-radius: 2px; transform: scaleY(.25); }
+.said.fresh .eq i { animation: eq 480ms var(--ease) 4 alternate; }
+.eq i:nth-child(2) { animation-delay: 120ms !important; }
+.eq i:nth-child(3) { animation-delay: 240ms !important; }
+.eq i:nth-child(4) { animation-delay: 80ms !important; }
+.eq i:nth-child(5) { animation-delay: 300ms !important; }
+.voice-note {
+  display: none; align-items: center; gap: var(--s2);
+  margin: var(--s3) 0 0; font-weight: 600; color: var(--danger); font-size: .9375rem;
+}
+.voice-note.show { display: flex; }
+.voice-actions { margin-top: var(--s4); }
+.voice-actions .btn { width: 100%; justify-content: center; }
+
+.counts {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--s5) 0 0; border-top: 1px solid var(--hair);
+}
+.count { padding: var(--s4) var(--s3) 0; }
+.count:first-child { padding-left: 0; }
+.count + .count { border-left: 1px solid var(--hair); padding-left: var(--s4); }
+.count dd { margin: 0; font: 600 2rem/1 var(--mono); }
+.count dt { color: var(--ink-soft); font-size: .875rem; margin-top: var(--s2); }
+.counts dt, .counts dd { display: block; }
+.count { display: flex; flex-direction: column-reverse; justify-content: flex-end; }
+
+/* Journal */
+.log { list-style: none; margin: var(--s3) 0 0; padding: 0 var(--s1) 0 0; max-height: min(34vh, 320px); overflow: auto; }
+.log li {
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--s3); align-items: center;
+  padding: var(--s3) 0; border-bottom: 1px solid var(--hair);
+}
+.log li:last-child { border-bottom: 0; }
+.log .ic {
+  width: 32px; height: 32px; border-radius: var(--r-sm); display: grid; place-items: center;
+  background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--hair);
+}
+.log .m { font-weight: 600; }
+.log .st { display: flex; align-items: center; gap: 6px; font-size: .875rem; font-weight: 600; color: var(--c); }
+.log time { font: 400 .875rem var(--mono); color: var(--ink-faint); white-space: nowrap; }
+.log li.sos { border: 1px solid var(--danger); border-radius: var(--r-md); padding: var(--s3); margin: var(--s1) 0; }
+.log li.sos .ic { background: var(--danger); color: var(--surface); border-color: transparent; }
+.log li.empty {
+  display: block; text-align: center; color: var(--ink-soft);
+  border: 1px dashed var(--hair-strong); border-radius: var(--r-md); padding: var(--s5) var(--s4);
 }
 
-.sos-overlay{
-  position:fixed;inset:0;z-index:20;display:none;place-items:center;text-align:center;
-  padding:24px;background:#8e1020f0;
+footer {
+  margin-top: var(--s6); padding-top: var(--s4); border-top: 1px solid var(--hair);
+  color: var(--ink-soft); font-size: .875rem;
+  display: flex; justify-content: space-between; gap: var(--s3); flex-wrap: wrap;
 }
-.sos-overlay.show{display:grid;animation:fade .3s ease-out}
-.sos-overlay .br{font-size:clamp(1.6rem,5vw,3.2rem);color:#fff;letter-spacing:.18em;opacity:.75;font-weight:700}
-.sos-overlay h3{margin:8px 0 0;font-size:clamp(3.4rem,12vw,9rem);line-height:.9;color:#fff;letter-spacing:.04em}
-.sos-overlay p{font-size:clamp(1.1rem,2.4vw,1.75rem);margin:16px 0 0;color:#fff}
-.sos-overlay .st{
-  display:inline-block;margin-top:20px;padding:12px 22px;border-radius:999px;
-  font-weight:700;font-size:clamp(1.05rem,2.1vw,1.5rem);background:#0005;color:#fff;
-}
-.sos-overlay .st.ok{background:#fff;color:#0a5c36}
-.sos-overlay .ring-sos{
-  position:absolute;width:42vmin;height:42vmin;border:2px solid #fff5;border-radius:50%;
-  animation:sosring 1.8s ease-out infinite;
-}
-.sos-overlay small{display:block;margin-top:22px;color:#fffc}
-.sos-overlay button.close-sos{
-  margin-top:18px;background:transparent;border:1px solid #fff8;color:#fff;
-  font:700 .95rem var(--font);padding:10px 16px;border-radius:999px;cursor:pointer;
-}
-.sos-overlay button.close-sos:hover{background:#fff2}
 
-footer{
-  margin-top:12px;padding-top:10px;border-top:1px solid var(--line);
-  color:var(--dim);font-size:.82rem;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;
+/* ---------------------------------------------------------------- SOS -- */
+.sos-overlay {
+  position: fixed; inset: 0; z-index: 30;
+  display: none; place-items: center; text-align: center;
+  padding: var(--s5); background: var(--sos); color: #fff;
 }
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.sos-overlay.show { display: grid; animation: enter 240ms var(--ease); }
+.sos-box { position: relative; max-width: 40rem; }
+.sos-overlay .br { font-size: clamp(1.75rem, 5vw, 3rem); letter-spacing: .2em; opacity: .8; }
+.sos-overlay h2 { margin: var(--s2) 0 0; font-size: clamp(4rem, 13vw, 9rem); line-height: .9; letter-spacing: .02em; font-weight: 700; }
+.sos-overlay p { margin: var(--s4) 0 0; font-size: clamp(1.2rem, 2.4vw, 1.75rem); font-weight: 600; }
+.sos-overlay .st {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  margin-top: var(--s5); padding: var(--s3) var(--s5); border-radius: var(--r-md);
+  font-weight: 700; font-size: clamp(1.1rem, 2.1vw, 1.5rem);
+  background: rgb(0 0 0 / .28); color: #fff;
+}
+.sos-overlay .st.ok { background: #fff; color: #0b5a37; }
+.sos-overlay .ring-sos {
+  position: absolute; width: 44vmin; height: 44vmin; border: 2px solid rgb(255 255 255 / .35); border-radius: 50%;
+  animation: sosring 2s var(--ease) infinite;
+}
+.sos-overlay small { display: block; margin-top: var(--s5); color: rgb(255 255 255 / .85); font-size: .9375rem; }
+.sos-overlay .close-sos {
+  margin-top: var(--s3); min-height: 44px; padding: 0 var(--s5);
+  background: transparent; border: 1px solid rgb(255 255 255 / .7); color: #fff;
+  border-radius: var(--r-md); font-weight: 700; cursor: pointer;
+  transition: background-color var(--fast) var(--ease), transform 120ms var(--ease);
+}
+.sos-overlay .close-sos:hover { background: rgb(255 255 255 / .14); }
+.sos-overlay .close-sos:active { transform: translateY(1px); }
+.sos-overlay .close-sos:focus-visible { outline-color: #fff; }
 
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-@keyframes eq{from{height:4px}to{height:16px}}
-@keyframes flash{0%{background:#f2c94c28}100%{background:linear-gradient(180deg, var(--ink-3), var(--ink-2))}}
-@keyframes fade{from{opacity:0}to{opacity:1}}
-@keyframes sosring{from{transform:scale(.6);opacity:1}to{transform:scale(2.2);opacity:0}}
+@keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes eq { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+@keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes enter { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes sosring { from { transform: scale(.6); opacity: 1; } to { transform: scale(2.1); opacity: 0; } }
 
-@media (max-width:1100px){
-  .status{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .grid{grid-template-columns:minmax(0,1fr)}
+/* ----------------------------------------------------------- adaptations -- */
+@media (max-width: 1180px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
 }
-@media (max-width:620px){
-  header.top{flex-direction:column;align-items:flex-start}
-  .hdr-right,.clock{text-align:left;justify-content:flex-start}
-  .status{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .stat .n,.kpi .val{font-size:1.35rem}
-  .wrap{padding:12px 12px 22px}
+/* Largeur moyenne : icônes reliées sur une ligne, texte centré dessous */
+@container (max-width: 72rem) {
+  .chain { align-items: start; }
+  .node { flex-direction: column; gap: var(--s2); text-align: center; }
+  .node-txt { display: flex; flex-direction: column; align-items: center; }
+  .link { margin: 0 var(--s2); }
 }
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none!important;transition:none!important}
-  .live.on .pulse{box-shadow:none}
+/* Étroit : liste verticale */
+@container (max-width: 44rem) {
+  .chain { display: flex; flex-direction: column; align-items: stretch; }
+  .link { height: 30px; margin: 0 0 0 21px; }
+  .link::before { left: 0; right: auto; top: 0; bottom: 0; border-top: 0; border-left: 2px solid var(--c); }
+  .link[data-s="idle"]::before, .link[data-s="bad"]::before { border-left-style: dashed; }
+  .link span { left: var(--s4); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); }
+  .node { flex-direction: row; text-align: left; gap: var(--s3); }
+  .node-txt { flex: 1; flex-direction: row; display: flex; justify-content: space-between; align-items: center; gap: var(--s3); }
+}
+@media (max-width: 1000px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric:nth-child(3) { border-left: 0; }
+  .metric:nth-child(n+3) { border-top: 1px solid var(--hair); }
+}
+@media (max-width: 640px) {
+  header.top { flex-direction: column; align-items: flex-start; gap: var(--s4); }
+  .tools { justify-content: flex-start; }
+  .clock { text-align: left; padding: 0; }
+  .panel { padding: var(--s4); }
+  .metrics { margin: var(--s4) calc(var(--s4) * -1) 0; }
+  .metric { padding: var(--s3) var(--s4); }
+  .read + .read, .count + .count { padding-left: var(--s3); }
+  /* Les schémas sont réduits de moitié : leurs textes sont agrandis d'autant */
+  .row-lbl.long { display: none; }
+  .row-lbl.court { display: inline; font-size: 24px; }
+  .dist { font-size: 28px; }
+  .dist.word { font-size: 24px; }
+  .ring-lbl { font-size: 20px; }
+  .seuil-lbl { font-size: 20px; }
+  .sector-lbl, .origin-lbl { font-size: 24px; }
+  .radar-svg { overflow: visible; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .said.fresh::after { animation: flash 600ms linear !important; }
 }
 </style>
 </head>
 <body>
 <a class="skip" href="#main">Aller au contenu</a>
-<div class="sim" role="status">Mode simulation — données fictives, aucune canne connectée</div>
+<div class="sim" role="status">Mode simulation : données fictives, aucune carte connectée</div>
+
+<!-- Icônes (tracé simple, couleur héritée) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m5 8.2 2 2 4-4.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 1.6 14.4 8 8 14.4 1.6 8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="currentColor"/></symbol>
+  <symbol id="i-bad" viewBox="0 0 16 16"><path d="M8 1.8 15 14H1z" fill="currentColor"/><path d="M8 6v3.6" style="stroke:var(--surface)" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="11.8" r="1" style="fill:var(--surface)"/></symbol>
+  <symbol id="i-idle" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.6 2.4"/></symbol>
+</svg>
+
 <div class="wrap">
   <header class="top">
     <div class="brand">
-      <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 3c2.2 0 3.5 1.4 3.5 3.2" fill="none" stroke="#1a1404" stroke-width="2.4" stroke-linecap="round"/><path d="M15 3 7 21" stroke="#1a1404" stroke-width="2.4" stroke-linecap="round"/><path d="M8.3 18 7 21" stroke="#c62334" stroke-width="2.6" stroke-linecap="round"/></svg>
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="2.2" stroke-linecap="round"><path class="stick" d="M15 3.5c2 0 3.2 1.2 3.2 2.9M15 3.5 8.6 18"/><path class="tip" d="M8.6 18 7.4 20.8"/></svg>
       </div>
-      <div class="title">
+      <div>
         <h1>Canne &amp; lunettes intelligentes</h1>
         <p>Supervision en direct · IFRI · Certification SEIoT · Projet 3</p>
       </div>
     </div>
-    <div class="hdr-right">
-      <div class="live" id="live" aria-live="polite"><span class="pulse" aria-hidden="true"></span><span id="live-lbl">En attente</span></div>
-      <div class="clock"><span id="clock">--:--:--</span><small id="updated">En attente des données…</small></div>
+    <div class="tools">
+      <div class="pill" id="live" data-s="idle" role="status"><span class="dot" aria-hidden="true"></span><span id="live-lbl">En attente</span></div>
+      <div class="clock"><span class="num" id="clock">--:--:--</span><small id="updated">En attente des données</small></div>
+      <button class="btn" id="speak" type="button" aria-pressed="false" title="Lire les annonces à voix haute sur l'ordinateur">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10v4h3l5 4V6L7 10H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span id="speak-lbl">Voix</span>
+      </button>
+      <button class="btn" id="theme" type="button" aria-pressed="false" title="Fond clair et texte agrandi pour le vidéoprojecteur">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="11" r="2.4" stroke="currentColor" stroke-width="2"/><path d="M17 9.5 21 8v6l-4-1.5M7 16l-1.5 3M13 16l1.5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Projecteur</span>
+      </button>
     </div>
   </header>
 
   <div class="err" id="err" role="alert">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.2" r="1" fill="currentColor"/></svg>
-    Tableau de bord injoignable. Vérifier le serveur ou ouvrir avec <code>?demo=1</code>.
+    <svg width="20" height="20" aria-hidden="true"><use href="#i-bad"/></svg>
+    <span>Serveur injoignable. Vérifier la connexion, ou ouvrir la page avec <code>?demo=1</code> pour la simulation.</span>
   </div>
 
   <main id="main">
-  <section class="status" aria-label="État du système">
-    <div class="chip" id="c-cane"><span class="dot"></span><div><div class="k">Canne</div><div class="v" id="v-cane">—</div></div></div>
-    <div class="chip" id="c-glasses"><span class="dot"></span><div><div class="k">Lunettes</div><div class="v" id="v-glasses">—</div></div></div>
-    <div class="chip" id="c-wifi"><span class="dot"></span><div><div class="k">Wi-Fi</div><div class="v" id="v-wifi">—</div></div></div>
-    <div class="chip" id="c-batt"><span class="dot"></span><div><div class="k">Batterie</div><div class="v" id="v-batt">—</div></div></div>
-    <div class="chip" id="c-up"><span class="dot"></span><div><div class="k">Marche</div><div class="v" id="v-up">—</div></div></div>
-    <div class="chip" id="c-sos"><span class="dot"></span><div><div class="k">Alerte SOS</div><div class="v" id="v-sos">Aucune</div></div></div>
-  </section>
+    <section class="panel chain-panel" aria-labelledby="h-chain">
+      <div class="ph">
+        <h2 id="h-chain">Chaîne de liaison</h2>
+        <p>Du casque de la personne jusqu'au téléphone du proche</p>
+      </div>
+      <div class="chain" role="list">
+        <div class="node" id="n-casque" data-s="idle" role="listitem">
+          <span class="node-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4.5" height="6.5" rx="1.5"/><rect x="16.5" y="14" width="4.5" height="6.5" rx="1.5"/></svg></span>
+          <span class="node-txt"><span class="node-k">Casque Bluetooth</span><span class="node-v"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="v-casque">Inconnu</span></span></span>
+        </div>
+        <div class="link" id="l-bt" data-s="idle" aria-hidden="true"><span>Bluetooth</span></div>
+        <div class="node" id="n-canne" data-s="idle" role="listitem">
+          <span class="node-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3.5c2 0 3.2 1.2 3.2 2.9M15 3.5 7.4 20.8"/></svg></span>
+          <span class="node-txt"><span class="node-k">Canne</span><span class="node-v"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="v-canne">Inconnue</span></span></span>
+        </div>
+        <div class="link" id="l-espnow" data-s="idle" aria-hidden="true"><span>ESP-NOW</span></div>
+        <div class="node" id="n-gw" data-s="idle" role="listitem">
+          <span class="node-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6.5" cy="13.5" r="3.5"/><circle cx="17.5" cy="13.5" r="3.5"/><path d="M10 13c1.3-1 2.7-1 4 0M3 13l1-5M21 13l-1-5"/></svg></span>
+          <span class="node-txt"><span class="node-k">Passerelle (lunettes)</span><span class="node-v"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="v-gw">Inconnue</span></span></span>
+        </div>
+        <div class="link" id="l-mqtt" data-s="idle" aria-hidden="true"><span>MQTT/TLS</span></div>
+        <div class="node" id="n-vps" data-s="idle" role="listitem">
+          <span class="node-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
+          <span class="node-txt"><span class="node-k">Serveur VPS</span><span class="node-v"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="v-vps">Inconnu</span></span></span>
+        </div>
+        <div class="link" id="l-tg" data-s="idle" aria-hidden="true"><span>SOS</span></div>
+        <div class="node" id="n-tg" data-s="idle" role="listitem">
+          <span class="node-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M21 4 3 11.2l6.6 2.2L12 20l3.2-5L21 4z"/><path d="m9.6 13.4 5.6-3.6"/></svg></span>
+          <span class="node-txt"><span class="node-k">Telegram</span><span class="node-v"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="v-tg">Aucune alerte</span></span></span>
+        </div>
+      </div>
+      <p class="chain-note" id="chain-note"></p>
+      <dl class="metrics">
+        <div class="metric"><dt>Batterie des lunettes</dt><dd id="m-batt">–</dd></div>
+        <div class="metric"><dt>Wi-Fi de la passerelle</dt><dd id="m-wifi">–</dd></div>
+        <div class="metric"><dt>Passerelle en marche depuis</dt><dd class="num" id="m-up">–</dd></div>
+        <div class="metric"><dt>Alerte SOS</dt><dd id="m-sos">–</dd></div>
+      </dl>
+    </section>
 
-  <div class="grid">
-    <div class="col">
-      <section class="panel radar" aria-labelledby="h-radar">
-        <div class="panel-head">
-          <div>
+    <div class="grid">
+      <div class="col">
+        <section class="panel" aria-labelledby="h-radar">
+          <div class="ph">
             <h2 id="h-radar">Radar de la canne</h2>
-            <p class="sub">Vue de dessus · 3 ultrasons à −30°, 0° et +30° · portée affichée 2,5 m</p>
+            <p>Vue de dessus · trois ultrasons à −30°, 0° et +30° · portée affichée 2 m</p>
           </div>
-        </div>
-        <svg id="radar" viewBox="0 0 620 350" role="img" aria-label="Distances mesurées par les trois capteurs de la canne"></svg>
-        <div class="kpis" aria-hidden="true">
-          <div class="kpi idle" id="k-left"><div class="dir">Gauche −30°</div><div class="val" id="kv-left">—</div></div>
-          <div class="kpi idle" id="k-center"><div class="dir">Centre 0°</div><div class="val" id="kv-center">—</div></div>
-          <div class="kpi idle" id="k-right"><div class="dir">Droite +30°</div><div class="val" id="kv-right">—</div></div>
-        </div>
-        <div class="legend">
-          <span><b style="background:var(--danger)"></b>Danger &lt; 50 cm</span>
-          <span><b style="background:var(--warn)"></b>Attention 50–120 cm</span>
-          <span><b style="background:var(--free)"></b>Libre &gt; 120 cm</span>
-        </div>
-        <p class="sr" id="radar-text" aria-live="polite"></p>
-      </section>
-      <section class="panel profile" aria-labelledby="h-profile">
-        <h2 id="h-profile">Deux zones couvertes</h2>
-        <p class="sub">Vue de profil · une canne blanche classique ne détecte pas ce qui est à hauteur de tête</p>
-        <svg id="profile" viewBox="0 0 600 270" role="img" aria-label="Obstacles au sol et à hauteur de tête"></svg>
-      </section>
-    </div>
+          <svg class="radar-svg" id="radar" viewBox="0 0 640 404" role="img" aria-label="Distances mesurées par les trois capteurs de la canne"></svg>
+          <div class="reads">
+            <div class="read" id="r-left" data-s="idle"><div class="read-k">Gauche <small>annonce sous 60 cm</small></div><span class="read-v" id="rv-left">–</span><div class="read-s"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="rs-left">Pas de mesure</span></div></div>
+            <div class="read" id="r-center" data-s="idle"><div class="read-k">Devant <small>annonce sous 120 cm</small></div><span class="read-v" id="rv-center">–</span><div class="read-s"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="rs-center">Pas de mesure</span></div></div>
+            <div class="read" id="r-right" data-s="idle"><div class="read-k">Droite <small>annonce sous 60 cm</small></div><span class="read-v" id="rv-right">–</span><div class="read-s"><svg class="shape" aria-hidden="true"><use href="#i-idle"/></svg><span id="rs-right">Pas de mesure</span></div></div>
+          </div>
+          <ul class="legend" aria-label="Légende">
+            <li data-s="bad"><svg class="shape" aria-hidden="true"><use href="#i-bad"/></svg><span><b>Annoncé</b> : sous le seuil, la canne le dit</span></li>
+            <li data-s="warn"><svg class="shape" aria-hidden="true"><use href="#i-warn"/></svg><span><b>Marge</b> : 20 cm au-dessus du seuil, contre le clignotement</span></li>
+            <li data-s="ok"><svg class="shape" aria-hidden="true"><use href="#i-ok"/></svg><span><b>Hors seuil</b> ou <b>libre</b> : rien à annoncer</span></li>
+          </ul>
+        </section>
 
-    <div class="col">
-      <section class="panel voice" aria-labelledby="h-voice">
-        <div><h2 id="h-voice">Ce qu'entend la personne</h2><p class="sub">Messages joués dans les écouteurs</p></div>
-        <div class="said" id="said">
-          <q id="said-text">Système en attente</q>
-          <div class="meta">
-            <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-            <span id="said-meta">Aucun message pour l'instant</span>
+        <section class="panel" aria-labelledby="h-profile">
+          <div class="ph">
+            <h2 id="h-profile">Deux hauteurs couvertes</h2>
+            <p>Vue de profil · une canne blanche classique ne détecte pas ce qui est à hauteur de tête</p>
           </div>
-        </div>
-        <p class="sr" aria-live="assertive" id="said-live"></p>
-        <button class="speak" id="speak" aria-pressed="false" type="button">
-          <svg id="speak-ic" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10v4h3l5 4V6L7 10H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <span id="speak-lbl">Faire parler le projecteur</span>
-        </button>
-        <div class="stats">
-          <div class="stat"><div class="n" id="s-ann">0</div><div class="t">messages vocaux</div></div>
-          <div class="stat"><div class="n" id="s-high">0</div><div class="t">obstacles en hauteur</div></div>
-          <div class="stat"><div class="n" id="s-sos">0</div><div class="t">alertes SOS</div></div>
-        </div>
-      </section>
-      <section class="panel" aria-labelledby="h-log">
-        <h2 id="h-log">Journal</h2>
-        <p class="sub">Annonces et alertes, les plus récentes en haut</p>
-        <ul class="log" id="log"><li class="empty">En attente des messages de la canne…</li></ul>
-      </section>
+          <svg class="profile-svg" id="profile" viewBox="0 0 640 262" role="img" aria-label="Obstacle à hauteur de tête et obstacle devant au sol"></svg>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="panel" aria-labelledby="h-voice">
+          <div class="ph">
+            <h2 id="h-voice">Ce qu'entend la personne</h2>
+            <p>Messages joués dans le casque Bluetooth</p>
+          </div>
+          <div class="said" id="said">
+            <q id="said-text">Système en attente</q>
+            <div class="meta"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span id="said-meta">Aucun message pour l'instant</span></div>
+          </div>
+          <p class="voice-note" id="voice-note" data-s="bad"><svg class="shape" aria-hidden="true"><use href="#i-bad"/></svg>Casque déconnecté : la canne ne peut pas parler</p>
+          <p class="sr" aria-live="assertive" id="said-live"></p>
+          <dl class="counts">
+            <div class="count"><dt>messages vocaux</dt><dd class="num" id="s-ann">0</dd></div>
+            <div class="count"><dt>obstacles en hauteur</dt><dd class="num" id="s-high">0</dd></div>
+            <div class="count"><dt>alertes SOS</dt><dd class="num" id="s-sos">0</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel" aria-labelledby="h-log">
+          <div class="ph">
+            <h2 id="h-log">Journal</h2>
+            <p>Annonces et alertes, les plus récentes en haut</p>
+          </div>
+          <ul class="log" id="log"><li class="empty">En attente des messages de la canne</li></ul>
+        </section>
+      </div>
     </div>
-  </div>
   </main>
 
   <footer>
@@ -373,167 +639,216 @@ footer{
   </footer>
 </div>
 
-<div class="sos-overlay" id="sos" role="alertdialog" aria-modal="true" aria-labelledby="sos-h">
+<div class="sos-overlay" id="sos" role="alertdialog" aria-modal="true" aria-labelledby="sos-h" aria-describedby="sos-d">
   <div class="ring-sos" aria-hidden="true"></div>
-  <div style="position:relative">
+  <div class="sos-box">
     <div class="br" aria-hidden="true">⠎⠕⠎</div>
-    <h3 id="sos-h">SOS</h3>
-    <p>La personne a demandé de l'aide</p>
-    <div class="st" id="sos-st">Envoi au proche…</div>
-    <small>Échap ou bouton ci-dessous pour fermer</small>
-    <div><button class="close-sos" id="sos-close" type="button">Fermer l'alerte</button></div>
+    <h2 id="sos-h">SOS</h2>
+    <p id="sos-d">La personne a demandé de l'aide</p>
+    <div class="st" id="sos-st">Envoi au proche</div>
+    <small>Touche Échap ou bouton ci-dessous pour fermer</small>
+    <button class="close-sos" id="sos-close" type="button">Fermer l'alerte</button>
   </div>
 </div>
 
 <script>
 (() => {
+"use strict";
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
-const DEMO = new URLSearchParams(location.search).has("demo");
-const RANGE = 250, O = {x:300, y:336}, R = 300;
-const ZONE = d => d === null ? "free" : d < 50 ? "danger" : d < 120 ? "warn" : "free";
-const COLOR = {danger:"var(--danger)", warn:"var(--warn)", free:"var(--free)"};
+const params = new URLSearchParams(location.search);
+const DEMO = params.has("demo");
 const num = x => typeof x === "number" && Number.isFinite(x);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const hhmmss = ts => new Date(ts * 1000).toLocaleTimeString("fr-FR");
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"});
+const f1 = n => n.toFixed(1);
 if (DEMO) document.body.classList.add("demo");
 
-function el(tag, attrs = {}, parent) {
+// Mêmes seuils que la canne (canne.ino) : une annonce sous le seuil, puis l'obstacle
+// ne disparaît qu'au-dessus de seuil + 20 cm (marge anti-clignotement).
+const SEUIL = {left: 60, center: 120, right: 60, head: 100};
+const MARGE = 20;
+const RANGE = 200;  // portée affichée (cm)
+const zone = (d, seuil) => !num(d) ? "ok" : d < seuil ? "bad" : d < seuil + MARGE ? "warn" : "ok";
+
+function svg(tag, attrs = {}, parent) {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
   if (parent) parent.appendChild(e);
   return e;
 }
-const pt = (deg, r) => [O.x + r * Math.sin(deg * Math.PI / 180), O.y - r * Math.cos(deg * Math.PI / 180)];
-const wedge = (deg, half, r) => {
-  const [x1, y1] = pt(deg - half, r), [x2, y2] = pt(deg + half, r);
-  return `M${O.x},${O.y} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)} Z`;
-};
-const arcPath = (deg, half, r) => {
-  const [x1, y1] = pt(deg - half, r), [x2, y2] = pt(deg + half, r);
-  return `M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)}`;
-};
-const px = cm => Math.min(cm, RANGE) / RANGE * R;
+function setState(el, s) {
+  el.dataset.s = s;
+  const use = el.querySelector("use");
+  if (use) use.setAttribute("href", "#i-" + s);
+}
 
-const radar = $("radar"), sensors = [];
+/* ------------------------------------------------------------ radar -- */
+const radar = $("radar");
+const O = {x: 320, y: 372}, R = 332, HALF = 12, FAN = 44;
+const px = cm => Math.min(cm, RANGE) / RANGE * R;
+const pt = (deg, r) => [O.x + r * Math.sin(deg * Math.PI / 180), O.y - r * Math.cos(deg * Math.PI / 180)];
+function wedge(deg, r) {
+  const [x1, y1] = pt(deg - HALF, r), [x2, y2] = pt(deg + HALF, r);
+  return `M${O.x},${O.y} L${f1(x1)},${f1(y1)} A${r},${r} 0 0 1 ${f1(x2)},${f1(y2)} Z`;
+}
+function arc(deg, r) {
+  const [x1, y1] = pt(deg - HALF, r), [x2, y2] = pt(deg + HALF, r);
+  return `M${f1(x1)},${f1(y1)} A${r},${r} 0 0 1 ${f1(x2)},${f1(y2)}`;
+}
+function annulus(deg, r1, r2) {
+  const [a, b] = pt(deg - HALF, r1), [c, d] = pt(deg + HALF, r1), [e, g] = pt(deg + HALF, r2), [h, i] = pt(deg - HALF, r2);
+  return `M${f1(a)},${f1(b)} A${r1},${r1} 0 0 1 ${f1(c)},${f1(d)} L${f1(e)},${f1(g)} A${r2},${r2} 0 0 0 ${f1(h)},${f1(i)} Z`;
+}
+const SENSORS = [
+  {id: "left", deg: -30, name: "Gauche"},
+  {id: "center", deg: 0, name: "Devant"},
+  {id: "right", deg: 30, name: "Droite"}
+];
 (function buildRadar() {
-  const defs = el("defs", {}, radar);
-  for (const [id, c] of Object.entries(COLOR)) {
-    const g = el("radialGradient", {id: "g-" + id, cx: O.x, cy: O.y, r: R, gradientUnits: "userSpaceOnUse"}, defs);
-    el("stop", {offset: "0", "stop-color": c, "stop-opacity": ".05"}, g);
-    el("stop", {offset: "1", "stop-color": c, "stop-opacity": id === "free" ? ".1" : ".35"}, g);
+  const defs = svg("defs", {}, radar);
+  for (const id of ["hatch", "hatch-p"]) {
+    const p = svg("pattern", {id, width: 9, height: 9, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)"}, defs);
+    svg("rect", {width: 9, height: 9, class: "hatch-bg"}, p);
+    svg("line", {x1: 1.5, y1: 0, x2: 1.5, y2: 9, class: "hatch-line"}, p);
   }
-  for (const [cm, cls] of [[50, "z50"], [120, "z120"], [200, ""], [250, ""]]) {
-    const r = px(cm);
-    el("path", {d: `M${O.x - r},${O.y} A${r},${r} 0 0 1 ${O.x + r},${O.y}`, class: "ring " + cls}, radar);
-    el("text", {x: O.x + r + 4, y: O.y - 4, class: "ringlbl"}, radar).textContent = cm >= 100 ? (cm / 100).toString().replace(".", ",") + " m" : cm + " cm";
+  // Éventail de −44° à +44° : seule la zone couverte par les capteurs est dessinée.
+  for (const deg of [-FAN, FAN]) {
+    const [x, y] = pt(deg, R);
+    svg("line", {x1: O.x, y1: O.y, x2: f1(x), y2: f1(y), class: "ring base"}, radar);
   }
-  [["G", -30], ["C", 0], ["D", 30]].forEach(([name, deg]) => {
-    el("path", {d: wedge(deg, 13, R), class: "cone-bg"}, radar);
-    const cone = el("path", {class: "cone"}, radar);
-    const arc = el("path", {class: "arc"}, radar);
-    const [lx, ly] = pt(deg, R + 2);
-    const lbl = el("text", {x: lx, y: ly - 6, "text-anchor": "middle", class: "lbl"}, radar);
-    lbl.textContent = name + " " + (deg > 0 ? "+" : deg < 0 ? "−" : "") + Math.abs(deg) + "°";
-    const dist = el("text", {"text-anchor": "middle", class: "dist"}, radar);
-    sensors.push({deg, cone, arc, dist});
-  });
-  el("circle", {cx: O.x, cy: O.y, r: 10, fill: "var(--tactile)"}, radar);
+  for (const cm of [50, 100, 150, 200]) {
+    const r = px(cm), [x1, y1] = pt(-FAN, r), [x2, y2] = pt(FAN, r), [lx, ly] = pt(FAN + 3, r);
+    svg("path", {d: `M${f1(x1)},${f1(y1)} A${r},${r} 0 0 1 ${f1(x2)},${f1(y2)}`, class: "ring"}, radar);
+    svg("text", {x: f1(lx), y: f1(ly + 4), class: "ring-lbl"}, radar).textContent =
+      cm >= 100 ? String(cm / 100).replace(".", ",") + " m" : cm + " cm";
+  }
+  for (const s of SENSORS) {
+    const seuil = SEUIL[s.id];
+    svg("path", {d: wedge(s.deg, R), class: "sector"}, radar);
+    s.cone = svg("path", {class: "cone", "data-s": "idle"}, radar);
+    svg("path", {d: annulus(s.deg, px(seuil), px(seuil + MARGE)), class: "band"}, radar);
+    svg("path", {d: arc(s.deg, px(seuil)), class: "seuil"}, radar);
+    s.obst = svg("path", {class: "obstacle", "data-s": "idle", opacity: 0}, radar);
+    const [lx, ly] = pt(s.deg, px(seuil + MARGE) + 16);
+    svg("text", {x: f1(lx), y: f1(ly + 5), "text-anchor": "middle", class: "seuil-lbl"}, radar).textContent = seuil + " cm";
+    const [nx, ny] = pt(s.deg, R + 16);
+    svg("text", {x: f1(nx), y: f1(ny), "text-anchor": "middle", class: "sector-lbl"}, radar).textContent = s.name;
+  }
+  svg("circle", {cx: O.x, cy: O.y, r: 8, class: "origin"}, radar);
+  svg("text", {x: O.x, y: O.y + 28, "text-anchor": "middle", class: "origin-lbl"}, radar).textContent = "Canne";
 })();
 
-function setKpi(id, live, d) {
-  const z = live ? ZONE(d) : "idle";
-  $("k-" + id).className = "kpi " + z;
-  $("kv-" + id).textContent = !live ? "—" : d === null ? "libre" : d + " cm";
+function setRead(id, s, d, live) {
+  const box = $("r-" + id), v = $("rv-" + id);
+  setState(box, s);
+  if (!live) { v.className = "read-v"; v.textContent = "–"; }
+  else if (num(d)) { v.className = "read-v"; v.innerHTML = `${d}<span class="u">cm</span>`; }
+  else { v.className = "read-v word"; v.textContent = "Libre"; }
+  $("rs-" + id).textContent = !live ? "Pas de mesure"
+    : s === "bad" ? "Annoncé" : s === "warn" ? "Marge de 20 cm" : num(d) ? "Hors seuil" : "Rien détecté";
 }
 
 function drawRadar(values, live) {
   const words = [];
-  const names = ["gauche", "centre", "droite"];
-  const ids = ["left", "center", "right"];
-  sensors.forEach((s, i) => {
+  SENSORS.forEach((s, i) => {
     const d = live && num(values[i]) ? values[i] : null;
-    const z = live ? ZONE(d) : "free";
+    const z = live ? zone(d, SEUIL[s.id]) : "idle";
     const r = d === null ? R : px(d);
-    s.cone.setAttribute("d", wedge(s.deg, 13, r));
-    s.cone.setAttribute("fill", live ? `url(#g-${z})` : "#ffffff05");
-    s.arc.setAttribute("d", arcPath(s.deg, 13, Math.max(r, 30)));
-    s.arc.setAttribute("stroke", live ? COLOR[z] : "transparent");
-    s.arc.setAttribute("stroke-opacity", d === null ? ".35" : "1");
-    const [tx, ty] = pt(s.deg, R - 42);
-    s.dist.setAttribute("x", tx); s.dist.setAttribute("y", ty);
-    s.dist.setAttribute("fill", live ? COLOR[z] : "var(--dim)");
-    s.dist.textContent = !live ? "—" : d === null ? "libre" : d + " cm";
-    words.push(names[i] + " " + (!live ? "inconnu" : d === null ? "libre" : d + " centimètres"));
-    setKpi(ids[i], live, d);
+    s.cone.setAttribute("d", wedge(s.deg, r));
+    s.cone.dataset.s = z;
+    s.cone.toggleAttribute("data-empty", live && d === null);
+    s.obst.dataset.s = z;
+    s.obst.setAttribute("d", arc(s.deg, Math.max(r, 24)));
+    s.obst.setAttribute("opacity", d === null ? 0 : 1);
+    setRead(s.id, z, d, live);
+    words.push(s.name + " " + (!live ? "inconnu" : d === null ? "libre" : d + " centimètres"));
   });
-  $("radar-text").textContent = words.join(", ");
+  radar.setAttribute("aria-label", "Distances de la canne : " + words.join(", "));
 }
 
-const prof = $("profile"), P = {};
+/* ----------------------------------------------------------- profil -- */
+const prof = $("profile"), P = {X0: 150, W: 450, G: 240};
 (function buildProfile() {
-  const G = 248, X0 = 128, W = 440;
-  el("line", {x1: 0, y1: G, x2: 600, y2: G, stroke: "var(--line-2)", "stroke-width": 2}, prof);
-  el("rect", {x: X0, y: 34, width: W, height: 62, rx: 10, fill: "#5aa9e60d", stroke: "#5aa9e633", "stroke-dasharray": "4 6"}, prof);
-  el("rect", {x: X0, y: 160, width: W, height: 86, rx: 10, fill: "#f2c94c0b", stroke: "#f2c94c33", "stroke-dasharray": "4 6"}, prof);
-  el("text", {x: X0 + 4, y: 24, class: "zone-txt", fill: "var(--info)"}, prof).textContent = "Zone haute · lunettes";
-  el("text", {x: X0 + 4, y: 150, class: "zone-txt", fill: "var(--tactile)"}, prof).textContent = "Zone basse · canne";
-  const body = el("g", {fill: "none", stroke: "var(--paper)", "stroke-width": 7, "stroke-linecap": "round", "stroke-linejoin": "round"}, prof);
-  el("circle", {cx: 70, cy: 62, r: 20, fill: "var(--paper)", stroke: "none"}, prof);
-  el("path", {d: "M70 88 L70 168 M70 168 L52 246 M70 168 L86 246 M70 104 L100 138"}, body);
-  el("rect", {x: 78, y: 54, width: 22, height: 9, rx: 3, fill: "var(--info)"}, prof);
-  el("line", {x1: 100, y1: 138, x2: 150, y2: 244, stroke: "var(--paper)", "stroke-width": 5, "stroke-linecap": "round"}, prof);
-  el("line", {x1: 141, y1: 225, x2: 150, y2: 244, stroke: "var(--danger)", "stroke-width": 5, "stroke-linecap": "round"}, prof);
-  P.headBeam = el("path", {class: "beam", fill: "#5aa9e622"}, prof);
-  P.lowBeam = el("path", {class: "beam", fill: "#f2c94c1c"}, prof);
-  P.headObs = el("rect", {y: 40, width: 44, height: 50, rx: 6}, prof);
-  P.lowObs = el("rect", {width: 40, rx: 6}, prof);
-  P.headTxt = el("text", {y: 116, class: "dist", "text-anchor": "middle"}, prof);
-  P.lowTxt = el("text", {y: 150, class: "dist", "text-anchor": "middle"}, prof);
-  P.X0 = X0; P.W = W; P.G = G;
+  const {X0, W, G} = P;
+  const x = cm => X0 + cm / RANGE * W;
+  const defs = svg("defs", {}, prof);
+  const p = svg("pattern", {id: "hatch-p", width: 9, height: 9, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)"}, defs);
+  svg("rect", {width: 9, height: 9, class: "hatch-bg"}, p);
+  svg("line", {x1: 1.5, y1: 0, x2: 1.5, y2: 9, class: "hatch-line"}, p);
+
+  svg("rect", {x: X0, y: 30, width: W, height: 68, rx: 8, class: "row-zone"}, prof);
+  svg("rect", {x: X0, y: 158, width: W, height: G - 158, rx: 8, class: "row-zone"}, prof);
+  for (const [y, long, court] of [[20, "Hauteur de tête · lunettes · annonce sous 100 cm", "Tête · sous 100 cm"],
+                                  [148, "Devant, au sol · canne · annonce sous 120 cm", "Sol · sous 120 cm"]]) {
+    svg("text", {x: X0, y, class: "row-lbl long"}, prof).textContent = long;
+    svg("text", {x: X0, y, class: "row-lbl court"}, prof).textContent = court;
+  }
+  for (const [cm, y1, y2] of [[SEUIL.head, 30, 98], [SEUIL.center, 158, G]]) {
+    svg("rect", {x: x(cm), y: y1, width: x(cm + MARGE) - x(cm), height: y2 - y1, class: "band"}, prof);
+    svg("line", {x1: x(cm), y1, x2: x(cm), y2, class: "seuil"}, prof);
+  }
+  svg("line", {x1: 0, y1: G, x2: 640, y2: G, class: "ground"}, prof);
+  svg("circle", {cx: 70, cy: 58, r: 18, class: "head-dot"}, prof);
+  svg("rect", {x: 76, y: 50, width: 20, height: 8, rx: 3, class: "glasses"}, prof);
+  svg("path", {d: "M70 84 L70 164 M70 164 L54 238 M70 164 L86 238 M70 100 L100 134", class: "body-line"}, prof);
+  svg("line", {x1: 100, y1: 134, x2: 146, y2: 236, class: "cane"}, prof);
+  svg("line", {x1: 138, y1: 218, x2: 146, y2: 236, class: "cane-tip"}, prof);
+  P.headBeam = svg("polygon", {class: "beam", "data-s": "idle"}, prof);
+  P.lowBeam = svg("polygon", {class: "beam", "data-s": "idle"}, prof);
+  P.headObs = svg("rect", {y: 36, width: 30, height: 56, rx: 5, class: "obs", "data-s": "idle"}, prof);
+  P.lowObs = svg("rect", {y: G - 58, width: 30, height: 58, rx: 5, class: "obs", "data-s": "idle"}, prof);
+  P.headTxt = svg("text", {class: "dist"}, prof);
+  P.lowTxt = svg("text", {class: "dist"}, prof);
 })();
 
-function drawProfile(head, glassesOk, low, live) {
-  const x = cm => P.X0 + Math.min(cm, RANGE) / RANGE * P.W;
-  const hx = glassesOk && num(head) ? x(head) : P.X0 + P.W;
-  P.headBeam.setAttribute("d", `M100 58 L${hx} 46 L${hx} 80 Z`);
-  P.headBeam.setAttribute("fill", glassesOk ? "#5aa9e626" : "#ffffff06");
-  const hz = ZONE(glassesOk && num(head) ? head : null);
-  P.headObs.setAttribute("x", hx); P.headObs.setAttribute("fill", COLOR[hz]);
-  P.headObs.style.opacity = live && glassesOk && num(head) ? 1 : 0;
-  const headHit = glassesOk && num(head);
-  P.headTxt.setAttribute("x", headHit ? Math.min(hx + 22, 540) : P.X0 + P.W - 14);
-  P.headTxt.setAttribute("y", headHit ? 116 : 86);
-  P.headTxt.setAttribute("text-anchor", headHit ? "middle" : "end");
-  P.headTxt.setAttribute("fill", glassesOk ? COLOR[hz] : "var(--dim)");
-  P.headTxt.textContent = !live ? "" : !glassesOk ? "lunettes absentes" : num(head) ? head + " cm" : "libre";
-
-  const lx = num(low) ? x(low) : P.X0 + P.W;
-  P.lowBeam.setAttribute("d", `M150 232 L${lx} 196 L${lx} 244 Z`);
-  const lz = ZONE(num(low) ? low : null);
-  P.lowObs.setAttribute("x", lx); P.lowObs.setAttribute("y", P.G - 56); P.lowObs.setAttribute("height", 56);
-  P.lowObs.setAttribute("fill", COLOR[lz]); P.lowObs.style.opacity = live && num(low) ? 1 : 0;
-  P.lowTxt.setAttribute("x", num(low) ? Math.min(lx + 20, 540) : P.X0 + P.W - 14);
-  P.lowTxt.setAttribute("y", num(low) ? P.G - 68 : 236);
-  P.lowTxt.setAttribute("text-anchor", num(low) ? "middle" : "end");
-  P.lowTxt.setAttribute("fill", live ? COLOR[lz] : "var(--dim)");
-  P.lowTxt.textContent = !live ? "" : num(low) ? low + " cm" : "libre";
+function placeText(t, s, hit, xHit, yHit, yMiss, text) {
+  t.dataset.s = s;
+  t.setAttribute("x", f1(hit ? Math.min(xHit, 590) : P.X0 + P.W - 10));
+  t.setAttribute("y", hit ? yHit : yMiss);
+  t.setAttribute("text-anchor", hit ? "middle" : "end");
+  t.setAttribute("class", hit ? "dist" : "dist word");
+  t.textContent = text;
 }
 
+function drawProfile(head, glassesOk, low, canneOk) {
+  const x = cm => P.X0 + Math.min(cm, RANGE) / RANGE * P.W;
+  const hHit = glassesOk && num(head);
+  const hz = glassesOk ? zone(hHit ? head : null, SEUIL.head) : "idle";
+  const hx = hHit ? x(head) : P.X0 + P.W;
+  P.headBeam.setAttribute("points", `96,54 ${f1(hx)},40 ${f1(hx)},88`);
+  P.headBeam.dataset.s = hz;
+  P.headObs.setAttribute("x", f1(hx)); P.headObs.dataset.s = hz;
+  P.headObs.style.opacity = hHit ? 1 : 0;
+  placeText(P.headTxt, hz, hHit, hx + 15, 118, 70,
+    !glassesOk ? "Lunettes hors ligne" : hHit ? head + " cm" : "Rien détecté");
+
+  const lHit = canneOk && num(low);
+  const lz = canneOk ? zone(lHit ? low : null, SEUIL.center) : "idle";
+  const lx = lHit ? x(low) : P.X0 + P.W;
+  P.lowBeam.setAttribute("points", `146,230 ${f1(lx)},186 ${f1(lx)},${P.G}`);
+  P.lowBeam.dataset.s = lz;
+  P.lowObs.setAttribute("x", f1(lx)); P.lowObs.dataset.s = lz;
+  P.lowObs.style.opacity = lHit ? 1 : 0;
+  placeText(P.lowTxt, lz, lHit, lx + 15, P.G - 68, 206,
+    !canneOk ? "Canne injoignable" : lHit ? low + " cm" : "Rien détecté");
+}
+
+/* ---------------------------------------------------- voix projecteur -- */
 let speakOn = false;
 try { speakOn = localStorage.getItem("speak") === "1"; } catch (e) {}
 const speakBtn = $("speak");
 const canSpeak = "speechSynthesis" in window;
 function renderSpeak() {
-  speakBtn.setAttribute("aria-pressed", String(speakOn));
-  $("speak-lbl").textContent = !canSpeak ? "Synthèse vocale indisponible" : speakOn ? "Le projecteur parle · couper" : "Faire parler le projecteur";
+  speakBtn.setAttribute("aria-pressed", String(speakOn && canSpeak));
   speakBtn.disabled = !canSpeak;
+  $("speak-lbl").textContent = !canSpeak ? "Voix indisponible" : "Voix";
 }
 speakBtn.addEventListener("click", () => {
   speakOn = !speakOn;
   try { localStorage.setItem("speak", speakOn ? "1" : "0"); } catch (e) {}
-  if (speakOn) say("Voix activée");
-  else speechSynthesis.cancel();
+  if (speakOn) say("Voix activée"); else speechSynthesis.cancel();
   renderSpeak();
 });
 function say(text) {
@@ -546,13 +861,34 @@ function say(text) {
 }
 renderSpeak();
 
+/* -------------------------------------------------- mode projecteur -- */
+const themeBtn = $("theme");
+function renderTheme() {
+  themeBtn.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "clair"));
+}
+themeBtn.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "clair" ? "sombre" : "clair";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
+  renderTheme();
+});
+renderTheme();
+
+/* ------------------------------------------------------------- SOS -- */
 const seenSos = new Set();
-let firstLoad = true, overlayId = null, overlayTimer = null;
-function closeSos() { $("sos").classList.remove("show"); overlayId = null; }
-$("sos").addEventListener("click", e => { if (e.target === $("sos") || e.target.id === "sos-close") closeSos(); });
+let firstLoad = true, overlayId = null, overlayTimer = null, lastFocus = null;
+function closeSos() {
+  if (overlayId === null) return;
+  $("sos").classList.remove("show");
+  overlayId = null;
+  clearTimeout(overlayTimer); overlayTimer = null;
+  if (lastFocus) lastFocus.focus();
+}
+$("sos").addEventListener("click", e => { if (e.target === $("sos")) closeSos(); });
 $("sos-close").addEventListener("click", closeSos);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSos(); });
 function showSos(ev) {
+  lastFocus = document.activeElement;
   overlayId = ev.event_id;
   $("sos").classList.add("show");
   $("sos-close").focus();
@@ -562,79 +898,123 @@ function showSos(ev) {
 function updateSosOverlay(ev) {
   if (overlayId !== ev.event_id) return;
   const st = $("sos-st");
-  st.textContent = ev.confirmed ? ev.status : "Envoi au proche…";
+  st.textContent = ev.confirmed ? ev.status : "Envoi au proche";
   st.className = "st" + (ev.confirmed ? " ok" : "");
-  if (ev.confirmed && !overlayTimer) overlayTimer = setTimeout(() => { overlayTimer = null; closeSos(); }, 12000);
+  if (ev.confirmed && !overlayTimer) overlayTimer = setTimeout(closeSos, 12000);
 }
 
-let lastSaidKey = null;
-const fmtUptime = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${String(m).padStart(2, "0")}` : m ? `${m} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`; };
-function chip(id, cls, text) { $("c-" + id).className = "chip " + cls; $("v-" + id).innerHTML = text; }
-
-function setLive(mode, label) {
-  $("live").className = "live " + mode;
-  $("live-lbl").textContent = label;
+/* -------------------------------------------------------- affichage -- */
+const fmtUptime = s => {
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? `${h} h ${String(m).padStart(2, "0")} min` : m ? `${m} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`;
+};
+function node(id, s, text) {
+  setState($("n-" + id), s);
+  $("v-" + id).textContent = text;
 }
+function link(id, s) { $("l-" + id).dataset.s = s; }
+function pill(s, text) { $("live").dataset.s = s; $("live-lbl").textContent = text; }
 
 const ICO = {
-  sos: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4 3 20h18L12 4z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r=".9" fill="#fff"/></svg>',
+  sos: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4 3 20h18L12 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.3" r="1" fill="currentColor"/></svg>',
   up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 19V6M6 11l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   stop: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2"/></svg>',
   left: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H6M11 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  fwd: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 19V6M6 11l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  fwd: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 20V5M7 10l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  ok: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   voice: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 10v4h3l5 4V6L7 10H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>'
 };
-
 function logIcon(e) {
+  const m = e.message || "";
   if (e.type === "SOS") return ICO.sos;
-  if (/hauteur/i.test(e.message)) return ICO.up;
-  if (/stop/i.test(e.message)) return ICO.stop;
-  if (/gauche/i.test(e.message)) return ICO.left;
-  if (/droite/i.test(e.message)) return ICO.right;
-  if (/tout droit/i.test(e.message)) return ICO.fwd;
+  if (/hauteur/i.test(m)) return ICO.up;
+  if (/stop/i.test(m)) return ICO.stop;
+  if (/allez à gauche/i.test(m)) return ICO.left;
+  if (/allez à droite/i.test(m)) return ICO.right;
+  if (/tout droit/i.test(m)) return ICO.fwd;
+  if (/prêt|alerte envoyée/i.test(m)) return ICO.ok;
   return ICO.voice;
 }
 
+let lastSaidKey = null;
 function render(s) {
+  const events = Array.isArray(s.events) ? s.events : [];
   const age = s.telemetry_at ? s.now - s.telemetry_at : Infinity;
-  const live = age <= 5;
-  const t = live ? (s.telemetry || {}) : {};
-  const online = s.availability === "online";
+  const fresh = age <= 5;
+  const avail = s.availability;
+  const online = avail === "online";
+  // « availability » décrit la passerelle (les lunettes), pas la canne.
+  const gwLive = online && fresh;
+  const t = gwLive ? (s.telemetry || {}) : {};
+  const canneOk = gwLive && t.espnow === true;
 
-  if (online && live) setLive("on", "En direct");
-  else if (online) setLive("stale", "Mesure ancienne");
-  else if (s.availability === "offline") setLive("off", "Hors ligne");
-  else setLive("", "En attente");
+  if (gwLive) pill("ok", "En direct");
+  else if (online) pill("warn", "Mesure ancienne");
+  else if (avail === "offline") pill("bad", "Passerelle hors ligne");
+  else pill("idle", "En attente");
 
-  chip("cane", online && live ? "ok" : online ? "warn" : s.availability === "offline" ? "bad" : "",
-       online && live ? "En ligne" : online ? "Pas de mesure récente" : s.availability === "offline" ? "Hors ligne" : "Inconnue");
-  chip("glasses", !live ? "" : t.espnow ? "ok" : "bad", !live ? "—" : t.espnow ? "Connectées" : "Absentes");
-  if (num(t.rssi)) {
-    const q = t.rssi >= -60 ? 4 : t.rssi >= -67 ? 3 : t.rssi >= -75 ? 2 : 1;
-    const bars = [6, 9, 12, 14].map((h, i) => `<i class="${i < q ? "on" : ""}" style="height:${h}px"></i>`).join("");
-    chip("wifi", q >= 3 ? "ok" : q === 2 ? "warn" : "bad", `${t.rssi} dBm <span class="bars" aria-hidden="true">${bars}</span>`);
-  } else chip("wifi", "", "—");
-  if (num(t.battery_pct)) {
+  const gwState = gwLive ? "ok" : online ? "warn" : avail === "offline" ? "bad" : "idle";
+  node("gw", gwState, gwLive ? "En ligne" : online ? "Sans mesure récente" : avail === "offline" ? "Hors ligne" : "Inconnue");
+  node("canne", !gwLive ? "idle" : canneOk ? "ok" : "bad", !gwLive ? "Inconnue" : canneOk ? "Joignable" : "Injoignable");
+  node("casque", !canneOk ? "idle" : t.headset ? "ok" : "bad", !canneOk ? "Inconnu" : t.headset ? "Connecté" : "Déconnecté");
+  node("vps", "ok", DEMO ? "Simulation" : "Joignable");
+  link("mqtt", gwState);
+  link("espnow", $("n-canne").dataset.s);
+  link("bt", $("n-casque").dataset.s);
+
+  $("chain-note").textContent =
+    !gwLive && avail === "offline" ? "La passerelle est hors ligne : l'état de la canne et du casque n'est plus connu. La canne continue de guider la personne sans Internet."
+    : !gwLive ? ""
+    : !canneOk ? "Les lunettes ne reçoivent plus la canne : vérifier qu'elle est allumée et à portée (ESP-NOW)."
+    : !t.headset ? "La canne fonctionne mais son casque Bluetooth est déconnecté : aucune annonce vocale possible."
+    : "";
+
+  // Mesures de la passerelle
+  if (gwLive && num(t.battery_pct)) {
     const pct = Math.max(0, Math.min(100, t.battery_pct));
-    const fill = pct < 20 ? "var(--danger)" : pct < 40 ? "var(--warn)" : "var(--free)";
-    chip("batt", pct < 20 ? "bad" : pct < 40 ? "warn" : "ok",
-      `<span class="batt">${pct} % <span class="batt-track" aria-hidden="true"><span class="batt-fill" style="width:${pct}%;background:${fill}"></span></span></span>`);
-  } else chip("batt", "", "Non mesurée");
-  chip("up", live && num(t.uptime_s) ? "ok" : "", live && num(t.uptime_s) ? fmtUptime(t.uptime_s) : "—");
+    const bs = pct < 20 ? "bad" : pct < 40 ? "warn" : "ok";
+    $("m-batt").innerHTML = `<span class="num">${pct} %</span><span class="gauge" data-s="${bs}" aria-hidden="true"><i style="width:${pct}%"></i></span>`;
+  } else $("m-batt").textContent = gwLive ? "Non mesurée" : "–";
+  if (gwLive && num(t.rssi)) {
+    const q = t.rssi >= -60 ? 4 : t.rssi >= -67 ? 3 : t.rssi >= -75 ? 2 : 1;
+    const bars = [5, 8, 11, 14].map((h, i) => `<i class="${i < q ? "on" : ""}" style="height:${h}px"></i>`).join("");
+    const word = ["", "faible", "moyen", "bon", "excellent"][q];
+    $("m-wifi").innerHTML = `<span class="num">${t.rssi} dBm</span><span class="bars" aria-hidden="true">${bars}</span><span class="sr">signal ${word}</span>`;
+  } else $("m-wifi").textContent = "–";
+  $("m-up").textContent = gwLive && num(t.uptime_s) ? fmtUptime(t.uptime_s) : "–";
 
-  drawRadar([t.left_cm, t.center_cm, t.right_cm], live);
-  const lows = [t.left_cm, t.center_cm, t.right_cm].filter(num);
-  drawProfile(t.head_cm, !!t.espnow, lows.length ? Math.min(...lows) : null, live);
+  // SOS
+  const sosEvents = events.filter(e => e.type === "SOS");
+  const lastSos = sosEvents[0];
+  const sosPending = (lastSos && !lastSos.confirmed) || (gwLive && t.sos_pending === true);
+  const tgState = sosPending ? "warn" : lastSos ? "ok" : "idle";
+  const short = {"Telegram envoyé": "Envoyé", "Proche déjà prévenu": "Déjà prévenu"};
+  node("tg", tgState, sosPending ? "Envoi en cours" : lastSos ? `${short[lastSos.status] || lastSos.status} à ${hhmm(lastSos.ts)}` : "Aucune alerte");
+  link("tg", tgState);
+  $("m-sos").textContent = sosPending ? "En cours d'envoi" : lastSos ? "Dernière à " + hhmm(lastSos.ts) : "Aucune";
+  for (const ev of sosEvents) {
+    if (!seenSos.has(ev.event_id)) {
+      seenSos.add(ev.event_id);
+      if (!firstLoad && s.now - ev.ts < 120) showSos(ev);
+    }
+    updateSosOverlay(ev);
+  }
 
-  $("updated").textContent = s.telemetry_at ? "Dernière mesure " + hhmmss(s.telemetry_at) + (live ? "" : " · ancienne") : "En attente des données…";
+  // Capteurs
+  drawRadar([t.left_cm, t.center_cm, t.right_cm], canneOk);
+  drawProfile(t.head_cm, gwLive, t.center_cm, canneOk);
+  $("updated").textContent = s.telemetry_at ? "Dernière mesure " + hhmmss(s.telemetry_at) + (fresh ? "" : ", ancienne") : "En attente des données";
 
-  const said = s.events.find(e => e.type === "annonce");
+  // Voix
+  $("voice-note").classList.toggle("show", canneOk && t.headset === false);
+  const said = events.find(e => e.type === "annonce");
   if (said) {
     const key = said.ts + said.message;
     $("said-text").textContent = said.message;
     const ago = Math.max(0, Math.round(s.now - said.ts));
-    $("said-meta").textContent = ago < 2 ? "à l'instant" : `il y a ${ago} s`;
+    $("said-meta").textContent = ago < 2 ? "À l'instant" : ago < 120 ? `Il y a ${ago} s` : "À " + hhmm(said.ts);
     if (key !== lastSaidKey) {
       if (!firstLoad) {
         const box = $("said"); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh");
@@ -645,34 +1025,35 @@ function render(s) {
     }
   }
 
-  const sosEvents = s.events.filter(e => e.type === "SOS");
-  const lastSos = sosEvents[0];
-  chip("sos", !lastSos ? "" : lastSos.confirmed ? "ok" : "bad",
-       !lastSos ? "Aucune" : lastSos.confirmed ? esc(lastSos.status) : "Envoi en cours…");
-  for (const ev of sosEvents) {
-    if (!seenSos.has(ev.event_id)) {
-      seenSos.add(ev.event_id);
-      if (!firstLoad && s.now - ev.ts < 120) showSos(ev);
-    }
-    updateSosOverlay(ev);
-  }
-
   const st = s.stats || {};
   $("s-ann").textContent = st.annonces ?? 0;
   $("s-high").textContent = st.hauteur ?? 0;
   $("s-sos").textContent = st.sos ?? 0;
 
   const log = $("log");
-  if (!s.events.length) {
-    log.innerHTML = '<li class="empty">En attente des messages de la canne…</li>';
+  if (!events.length) {
+    log.innerHTML = '<li class="empty">En attente des messages de la canne</li>';
   } else {
-    log.innerHTML = s.events.map(e => {
+    log.innerHTML = events.map(e => {
       const isSos = e.type === "SOS";
-      const sub = isSos ? `<div class="s ${e.confirmed ? "ok" : "wait"}">${esc(e.status)}</div>` : "";
-      return `<li class="${isSos ? "sos" : ""}"><span class="ic" aria-hidden="true">${logIcon(e)}</span><div><div class="m">${esc(isSos ? "Alerte SOS — " + e.message : e.message)}</div>${sub}</div><time>${hhmmss(e.ts)}</time></li>`;
+      const ss = e.confirmed ? "ok" : "warn";
+      const sub = isSos ? `<div class="st" data-s="${ss}"><svg class="shape" aria-hidden="true"><use href="#i-${ss}"/></svg>${esc(e.status)}</div>` : "";
+      return `<li class="${isSos ? "sos" : ""}"><span class="ic" aria-hidden="true">${logIcon(e)}</span><div><div class="m">${esc(isSos ? "Alerte SOS : " + String(e.message || "").toLowerCase() : e.message)}</div>${sub}</div><time class="num">${hhmmss(e.ts)}</time></li>`;
     }).join("");
   }
   firstLoad = false;
+}
+
+function renderUnreachable() {
+  pill("bad", "Serveur injoignable");
+  node("vps", "bad", "Injoignable");
+  for (const id of ["gw", "canne", "casque"]) node(id, "idle", "Inconnu");
+  for (const id of ["bt", "espnow", "mqtt"]) link(id, "idle");
+  $("chain-note").textContent = "";
+  drawRadar([], false);
+  drawProfile(null, false, null, false);
+  $("voice-note").classList.remove("show");
+  $("err").classList.add("show");
 }
 
 async function fetchState() {
@@ -681,37 +1062,57 @@ async function fetchState() {
   return r.json();
 }
 
+/* ---------------------------------------------------------- simulation --
+   ?demo=1 rejoue un parcours d'une minute au format réel des lunettes.
+   &t=25 démarre directement à la 25e seconde (pratique pour les captures). */
 const demo = (() => {
-  const t0 = Date.now() / 1000, events = [], stats = {annonces: 0, hauteur: 0, sos: 0};
-  const script = [
-    [2, "Système prêt"], [7, "Obstacle à gauche"], [13, "Obstacle devant, allez à droite"],
-    [19, "Continuez tout droit"], [25, "Attention, obstacle en hauteur"], [31, "Continuez tout droit"],
-    [37, "Obstacle à droite"], [44, "Stop, obstacle"], [50, "Continuez tout droit"]];
-  let done = 0, sosDone = false;
+  const TEXTE = ["", "Obstacle à gauche", "Obstacle à droite", "Obstacle devant, allez à gauche",
+    "Obstacle devant, allez à droite", "Stop, obstacle", "Attention, obstacle en hauteur",
+    "Continuez tout droit", "Alerte envoyée", "Système prêt", "Alerte non envoyée"];
+  // [seconde dans la minute, numéro du message]
+  const SCRIPT = [[6, 9], [9, 1], [16, 3], [20, 3], [24, 7], [27, 6], [41, 2], [47, 5], [51, 5], [55, 7], [58, 8]];
+  const offset = Math.max(0, Math.min(59, Number(params.get("t")) || 0));
+  const t0 = Date.now() / 1000 - offset;
+  const events = [], stats = {annonces: 0, hauteur: 0, sos: 0};
+  let cycle = -1, done = 0, sos = null, sosCount = 0;
+  const hex8 = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
   return () => {
-    const now = Date.now() / 1000, el = now - t0, c = el % 60;
-    if (c < 1 && done >= script.length) { done = 0; sosDone = false; }
-    while (done < script.length && c >= script[done][0]) {
-      const msg = script[done][1];
-      events.unshift({type: "annonce", message: msg, ts: now}); stats.annonces++;
-      if (/hauteur/.test(msg)) stats.hauteur++;
+    const now = Date.now() / 1000, el = now - t0, c = el % 60, start = t0 + Math.floor(el / 60) * 60;
+    if (Math.floor(el / 60) !== cycle) { cycle = Math.floor(el / 60); done = 0; sos = null; }
+    while (done < SCRIPT.length && c >= SCRIPT[done][0]) {
+      const n = SCRIPT[done][1];
+      if (n === 8 && !sos) { done++; continue; }
+      events.unshift({type: "annonce", mp3: n, message: TEXTE[n], ts: start + SCRIPT[done][0]});
+      stats.annonces++;
+      if (n === 6) stats.hauteur++;
       done++;
     }
-    if (!sosDone && c >= 54) {
-      sosDone = true; stats.sos++;
-      const ev = {type: "SOS", message: "Demande d'assistance", event_id: "demo" + Math.round(now), status: "En attente de Telegram", confirmed: false, ts: now};
-      events.unshift(ev);
-      setTimeout(() => { ev.status = "Telegram envoyé"; ev.confirmed = true; }, 2500);
+    if (!sos && c >= 53.5) {
+      sosCount = sosCount % 255 + 1;
+      sos = {type: "SOS", message: "Demande d'assistance", event_id: hex8() + "-" + sosCount,
+             status: "En attente de Telegram", confirmed: false, ts: start + 53.5};
+      events.unshift(sos); stats.sos++;
     }
+    if (sos && !sos.confirmed && now >= sos.ts + 2.5) { sos.status = "Telegram envoyé"; sos.confirmed = true; }
     events.length = Math.min(events.length, 50);
-    const wave = (a, p) => Math.round(a + Math.sin(el / p) * a * .7);
-    const left = c >= 6 && c < 13 ? wave(70, 2) : c >= 13 && c < 19 ? 160 : null;
-    const center = c >= 12 && c < 19 ? wave(80, 1.5) : c >= 43 && c < 50 ? 38 : null;
-    const right = c >= 12 && c < 19 ? 60 : c >= 36 && c < 43 ? wave(75, 2) : c >= 43 && c < 50 ? 45 : null;
-    const head = c >= 24 && c < 31 ? wave(85, 1.2) : null;
-    return {now, telemetry_at: now, availability: "online", stats, events,
-      telemetry: {left_cm: left, center_cm: center, right_cm: right, head_cm: head, espnow: true,
-                  battery_pct: 78, rssi: -58 + Math.round(Math.sin(el / 5) * 4), uptime_s: el}};
+
+    const wave = (a, amp, p) => Math.round(a + Math.sin(el / p) * amp);
+    const between = (a, b) => c >= a && c < b;
+    const offline = c < 4;
+    return {
+      now, availability: offline ? "offline" : "online",
+      telemetry_at: offline ? start - 8 : now, stats, events,
+      telemetry: {
+        v: 1, device: "canne01",
+        left_cm: between(9, 15) ? wave(44, 8, 2) : between(30, 36) ? 170 : between(47, 53) ? 45 : null,
+        center_cm: between(16, 23) ? wave(88, 14, 1.6) : between(47, 54) ? 40 : between(36, 40) ? 210 : null,
+        right_cm: between(16, 23) ? 52 : between(41, 46) ? wave(42, 8, 2) : between(47, 53) ? 35 : null,
+        head_cm: between(27, 32) ? wave(72, 10, 1.2) : between(32, 34) ? 108 : null,
+        battery_pct: 82, espnow: true, headset: !(c < 6 || between(36, 40)),
+        rssi: -61 + Math.round(Math.sin(el / 5) * 3),
+        sos_pending: !!(sos && !sos.confirmed), uptime_s: Math.floor(c - 4)
+      }
+    };
   };
 })();
 
@@ -722,9 +1123,7 @@ async function tick() {
     $("err").classList.remove("show");
     $("foot-src").textContent = DEMO ? "Source : simulation (?demo=1)" : "Source : MQTT/TLS via le VPS";
   } catch (e) {
-    chip("cane", "bad", "Tableau injoignable");
-    setLive("off", "Injoignable");
-    $("err").classList.add("show");
+    renderUnreachable();
   }
 }
 tick();
