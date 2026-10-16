@@ -7,7 +7,7 @@ const int COTE_DEUX = 0;     // message dans les deux oreilles
 const int COTE_GAUCHE = 1;   // oreille gauche seulement
 const int COTE_DROITE = 2;   // oreille droite seulement
 
-// À appeler dans setup(). nomCasque : nom Bluetooth du casque (ou une partie du nom).
+// À appeler dans setup(). nomCasque : nom Bluetooth EXACT du casque (majuscules ignorées).
 void audioBegin(const char *nomCasque);
 
 // Joue le message n (1 à 10) ; remplace le message en cours s'il y en a un.
